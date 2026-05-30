@@ -1,18 +1,14 @@
-package main
+package app
 
-import (
-	tea "github.com/charmbracelet/bubbletea"
-)
+import tea "github.com/charmbracelet/bubbletea"
 
-// encodeKey translates a Bubble Tea key event into the byte sequence a real
-// terminal would deliver to the child PTY. This is the raw passthrough path; it
-// covers printable runes, common control keys, and cursor/navigation keys with
-// their xterm escape sequences. The full keymap lands with the P1 FSM.
-func encodeKey(k tea.KeyMsg) []byte {
+// EncodeKey translates a Bubble Tea key event into the byte sequence a real
+// terminal delivers to the child PTY. Covers printable runes, common control
+// keys, and cursor/navigation escape sequences.
+func EncodeKey(k tea.KeyMsg) []byte {
 	switch k.Type {
 	case tea.KeyRunes:
 		if k.Alt {
-			// Alt prefixes the rune(s) with ESC.
 			return append([]byte{0x1b}, []byte(string(k.Runes))...)
 		}
 		return []byte(string(k.Runes))
@@ -49,9 +45,7 @@ func encodeKey(k tea.KeyMsg) []byte {
 	case tea.KeyLeft:
 		return []byte("\x1b[D")
 	}
-
-	// Control keys: KeyType for ctrl combinations equals the ASCII control code
-	// (e.g. KeyCtrlA == 0x01). Forward that single byte.
+	// Control keys: KeyType value equals the ASCII control code (e.g. KeyCtrlA == 0x01).
 	if t := int(k.Type); t > 0 && t < 0x20 {
 		return []byte{byte(t)}
 	}

@@ -24,16 +24,8 @@ func main() {
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	m.Prog = p
 
-	// Spawn the initial buffer before p.Run() so the user sees a session
-	// immediately. cmdNew returns a tea.Cmd; we call it directly here to get
-	// the synchronous result, then hand the model to the program.
-	initCmd := m.CmdNew("")
-	if initMsg := initCmd(); initMsg != nil {
-		// Feed the init message through Update so the registry and resize logic
-		// fire before the event loop starts.
-		_, _ = m.Update(initMsg)
-	}
-
+	// The initial buffer is spawned by the model on the first WindowSizeMsg, so
+	// claude starts at the real terminal size rather than a guessed default.
 	_, runErr := p.Run()
 
 	// Teardown: kill all remaining sessions.

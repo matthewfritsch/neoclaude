@@ -24,15 +24,24 @@ type Model struct {
 	cols int
 	rows int // terminal rows minus status line
 
+	// needInitial is true until the first buffer is spawned. The spawn is
+	// deferred to the first WindowSizeMsg so claude starts at the real terminal
+	// size (spawning earlier, before the size is known, makes claude paint at a
+	// wrong size and then repaint on resize, leaving stale overlapping frames).
+	needInitial bool
+	initialPath string
+
 	quitting bool
 }
 
-// New returns a Model with an empty registry in Insert mode.
+// New returns a Model with an empty registry in Insert mode. The initial buffer
+// is spawned on the first WindowSizeMsg, not here, so it gets the correct size.
 func New() *Model {
 	return &Model{
-		reg:     registry.New(),
-		fsm:     mode.New(),
-		cmdline: &ui.Cmdline{},
+		reg:         registry.New(),
+		fsm:         mode.New(),
+		cmdline:     &ui.Cmdline{},
+		needInitial: true,
 	}
 }
 

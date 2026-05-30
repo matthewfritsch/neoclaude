@@ -27,6 +27,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			b.VT.Resize(m.cols, m.rows)
 			_ = b.Session.Resize(uint16(m.cols), uint16(m.rows))
 		}
+		// Spawn the initial buffer now that we know the real terminal size.
+		if m.needInitial {
+			m.needInitial = false
+			return m, m.cmdNew(m.initialPath)
+		}
 		return m, nil
 
 	case PtyDataMsg:

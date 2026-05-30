@@ -1,0 +1,21 @@
+# Binaries
+/neoclaude
+*.exe
+*.out
+
+# Test artifacts
+*.test
+coverage.out
+dist/
+
+# OS / editor
+.DS_Store
+*.log
+
+# OMC state (keep PLAN.md and .omc/plans tracked)
+.omc/state/
+.omc/logs/
+.omc/research/
+.omc/sessions/
+.omc/notepad.md
+.omc/project-memory.json

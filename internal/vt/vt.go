@@ -1,29 +1,47 @@
-// Package vt wraps the hinshun/vt10x virtual terminal emulator and exposes a
+// Package vt wraps charmbracelet/x/vt (SafeEmulator) and exposes a
 // snapshot-friendly cell grid plus cursor state for the renderer.
 //
-// Library choice (R1 gate): we use github.com/hinshun/vt10x. It correctly
-// handles alt-screen (?1049h/l), scroll regions, 256-color and 24-bit truecolor
-// SGR sequences, and exposes an accessible cell grid via Cell(x,y). See
-// internal/vt/vt_test.go for the validation that gates this choice.
+// Library migration (was hinshun/vt10x, now charmbracelet/x/vt):
+//
+// hinshun/vt10x (abandoned 2022) misparsed modern keyboard-protocol sequences
+// that claude emits (Kitty keyboard push/pop \e[<u, \e[>1u, xterm
+// modifyOtherKeys \e[>4;2m).  Those sequences caused vt10x to reset the cursor
+// to row 0, so claude's input echoes at the top of the screen instead of the
+// input line.  charmbracelet/x/vt handles these sequences correctly and also
+// provides built-in scrollback — no separate ring buffer needed from the VT
+// layer (we keep buffer.Ring for P2 backward compatibility; the emulator's own
+// scrollback is also available via ScrollbackCellAt).
+//
+// Response forwarding: the emulator generates responses to DA queries, cursor-
+// position reports, keyboard-protocol acknowledgements, etc.  These bytes are
+// written into an internal io.Pipe (PipeWriter side).  Reading from that pipe
+// blocks when empty.  We drain it in a background goroutine that accumulates
+// bytes into an atomic buffer; DrainResponses() swaps out that buffer so the
+// Bubble Tea Update loop can forward the bytes to the child PTY without
+// blocking.
 package vt
 
 import (
+	"image/color"
 	"sync"
+	"unicode/utf8"
 
-	vt10x "github.com/hinshun/vt10x"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
+	xvt "github.com/charmbracelet/x/vt"
 )
 
-// ColorKind distinguishes how a Color value should be interpreted by the
-// renderer. The underlying vt10x library packs ANSI indices, 256-palette
-// indices, truecolor RGB, and "default" sentinels all into a single uint32, so
-// we decode that ambiguity once here.
+// Public types — kept identical to the vt10x era so render/blit.go, extract.go
+// and all search code compile unchanged.
+
+// ColorKind distinguishes how a Color value should be interpreted by the renderer.
 type ColorKind uint8
 
 const (
 	// ColorDefault means "use the terminal default" (fg/bg/cursor).
 	ColorDefault ColorKind = iota
-	// ColorPalette is an index into the 256-color palette (0..255); indices
-	// 0..15 are the ANSI/bright-ANSI colors.
+	// ColorPalette is an index into the 256-color palette (0..255).
+	// Indices 0..15 are the ANSI/bright-ANSI colors.
 	ColorPalette
 	// ColorRGB is a 24-bit truecolor value.
 	ColorRGB
@@ -48,6 +66,8 @@ const (
 )
 
 // Cell is a single screen cell: its rune plus styling.
+// Rune holds the first rune of the grapheme cluster.  Wide characters and
+// combining marks are a TODO — claude output is overwhelmingly single-rune.
 type Cell struct {
 	Rune   rune
 	FG, BG Color
@@ -61,18 +81,23 @@ type Grid struct {
 	Rows  int
 }
 
-// VT wraps a vt10x terminal. All exported methods are safe for concurrent use
-// with the emulator's internal locking; callers should still serialize Write
-// vs Snapshot at the application level (the Bubble Tea Update loop does this
-// naturally since it is single-goroutine).
+// VT wraps a charmbracelet/x/vt SafeEmulator.
+// All exported methods are safe for concurrent use: SafeEmulator carries its
+// own RWMutex, and we add a separate mu only for the fields we own (cols, rows,
+// cursorVisible, responseBuf).
 type VT struct {
-	mu   sync.Mutex
-	term vt10x.Terminal
-	cols int
-	rows int
+	mu            sync.Mutex
+	emu           *xvt.SafeEmulator
+	cols, rows    int
+	cursorVisible bool
+	responseBuf   []byte // drained from emu.Read() by the background goroutine
+	responseMu    sync.Mutex
 }
 
-// New creates a VT with the given dimensions. cols/rows are clamped to >= 1.
+// New creates a VT with the given dimensions.  cols/rows are clamped to >= 1.
+// A background goroutine is started immediately to drain emulator responses
+// (DA replies, CPR, kbd-protocol acks) into an internal buffer so that
+// DrainResponses() can forward them to the child PTY without blocking.
 func New(cols, rows int) *VT {
 	if cols < 1 {
 		cols = 1
@@ -80,21 +105,78 @@ func New(cols, rows int) *VT {
 	if rows < 1 {
 		rows = 1
 	}
-	return &VT{
-		term: vt10x.New(vt10x.WithSize(cols, rows)),
-		cols: cols,
-		rows: rows,
+	emu := xvt.NewSafeEmulator(cols, rows)
+
+	v := &VT{
+		emu:           emu,
+		cols:          cols,
+		rows:          rows,
+		cursorVisible: true,
 	}
+
+	// Track cursor visibility via callbacks.  The emulator fires this when
+	// DECTCEM (?25h/l) changes.
+	emu.SetCallbacks(xvt.Callbacks{
+		CursorVisibility: func(visible bool) {
+			v.mu.Lock()
+			v.cursorVisible = visible
+			v.mu.Unlock()
+		},
+	})
+
+	// Drain goroutine: reads responses the emulator wants to send back to the
+	// child (e.g. \x1b[?1;2c for DA1, \x1b[0n for DSR, kbd-protocol acks).
+	// Read() blocks on an io.Pipe so this must run in its own goroutine.
+	// We accumulate into responseBuf; DrainResponses() atomically swaps it.
+	go v.drainLoop()
+
+	return v
+}
+
+func (v *VT) drainLoop() {
+	buf := make([]byte, 4096)
+	for {
+		n, err := v.emu.Read(buf)
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			v.responseMu.Lock()
+			v.responseBuf = append(v.responseBuf, chunk...)
+			v.responseMu.Unlock()
+		}
+		if err != nil {
+			// io.EOF means the emulator was closed; exit cleanly.
+			return
+		}
+	}
+}
+
+// DrainResponses returns (and clears) any emulator-generated response bytes
+// that should be forwarded to the child PTY.  Returns nil if none are pending.
+// Called from the Bubble Tea Update loop after each VT.Write().
+func (v *VT) DrainResponses() []byte {
+	v.responseMu.Lock()
+	defer v.responseMu.Unlock()
+	if len(v.responseBuf) == 0 {
+		return nil
+	}
+	out := v.responseBuf
+	v.responseBuf = nil
+	return out
 }
 
 // Write feeds raw child output bytes into the emulator.
 func (v *VT) Write(p []byte) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	_, _ = v.term.Write(p)
+	_, _ = v.emu.Write(p)
 }
 
-// Resize changes the emulated screen dimensions. cols/rows are clamped to >= 1.
+// Close releases the emulator, which closes its response pipe and lets the
+// drain goroutine exit (Read returns io.EOF). Safe to call once per VT.
+func (v *VT) Close() error {
+	return v.emu.Close()
+}
+
+// Resize changes the emulated screen dimensions.  cols/rows are clamped to >= 1.
 func (v *VT) Resize(cols, rows int) {
 	if cols < 1 {
 		cols = 1
@@ -103,10 +185,10 @@ func (v *VT) Resize(cols, rows int) {
 		rows = 1
 	}
 	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.term.Resize(cols, rows)
 	v.cols = cols
 	v.rows = rows
+	v.mu.Unlock()
+	v.emu.Resize(cols, rows)
 }
 
 // Size returns the current dimensions.
@@ -119,9 +201,9 @@ func (v *VT) Size() (cols, rows int) {
 // Snapshot copies the current screen into a Grid for rendering.
 func (v *VT) Snapshot() Grid {
 	v.mu.Lock()
-	defer v.mu.Unlock()
-
 	cols, rows := v.cols, v.rows
+	v.mu.Unlock()
+
 	g := Grid{
 		Cells: make([][]Cell, rows),
 		Cols:  cols,
@@ -130,17 +212,7 @@ func (v *VT) Snapshot() Grid {
 	for y := 0; y < rows; y++ {
 		row := make([]Cell, cols)
 		for x := 0; x < cols; x++ {
-			glyph := v.term.Cell(x, y)
-			r := glyph.Char
-			if r == 0 {
-				r = ' '
-			}
-			row[x] = Cell{
-				Rune:  r,
-				FG:    decodeColor(glyph.FG),
-				BG:    decodeColor(glyph.BG),
-				Attrs: decodeAttr(glyph.Mode),
-			}
+			row[x] = cellAt(v.emu, x, y)
 		}
 		g.Cells[y] = row
 	}
@@ -149,67 +221,99 @@ func (v *VT) Snapshot() Grid {
 
 // Cursor returns the cursor position and whether it is visible.
 func (v *VT) Cursor() (x, y int, visible bool) {
+	pos := v.emu.CursorPosition()
 	v.mu.Lock()
-	defer v.mu.Unlock()
-	c := v.term.Cursor()
-	return c.X, c.Y, v.term.CursorVisible()
+	vis := v.cursorVisible
+	v.mu.Unlock()
+	return pos.X, pos.Y, vis
 }
 
-// vt10x attribute bit layout (from state.go). Kept local because the library
-// does not export them.
-const (
-	vtAttrReverse = 1 << iota
-	vtAttrUnderline
-	vtAttrBold
-	vtAttrGfx
-	vtAttrItalic
-	vtAttrBlink
-	vtAttrWrap
-)
+// cellAt extracts one Cell from the emulator at (x,y).
+func cellAt(emu *xvt.SafeEmulator, x, y int) Cell {
+	c := emu.CellAt(x, y)
+	if c == nil {
+		return Cell{Rune: ' '}
+	}
+	r := firstRune(c.Content)
+	if r == 0 {
+		r = ' '
+	}
+	return Cell{
+		Rune:  r,
+		FG:    colorFrom(c.Style.Fg),
+		BG:    colorFrom(c.Style.Bg),
+		Attrs: attrsFrom(c.Style),
+	}
+}
 
-func decodeAttr(mode int16) Attr {
+// firstRune returns the first rune of s, or 0 for an empty string.
+// TODO: handle multi-rune grapheme clusters (wide chars, combining marks).
+func firstRune(s string) rune {
+	if s == "" {
+		return 0
+	}
+	r, _ := utf8.DecodeRuneInString(s)
+	if r == utf8.RuneError {
+		return 0
+	}
+	return r
+}
+
+// colorFrom converts a charmbracelet/x/ansi color.Color to our Color.
+// We type-switch on the concrete ansi types to preserve palette indices
+// (important for P4 theming — ANSI16 remap only applies to palette colors,
+// not truecolor).  Any unknown concrete type falls back to RGB via RGBA().
+func colorFrom(c color.Color) Color {
+	if c == nil {
+		return Color{Kind: ColorDefault}
+	}
+	switch v := c.(type) {
+	case ansi.BasicColor:
+		// ANSI 0..15
+		return Color{Kind: ColorPalette, Palette: uint8(v)}
+	case ansi.IndexedColor:
+		// 256-palette 0..255
+		return Color{Kind: ColorPalette, Palette: uint8(v)}
+	case ansi.TrueColor:
+		// Packed 24-bit: 0xRRGGBB (deprecated but still emitted by some paths)
+		u := uint32(v)
+		return Color{
+			Kind: ColorRGB,
+			R:    uint8((u >> 16) & 0xff),
+			G:    uint8((u >> 8) & 0xff),
+			B:    uint8(u & 0xff),
+		}
+	case ansi.RGBColor:
+		return Color{Kind: ColorRGB, R: v.R, G: v.G, B: v.B}
+	default:
+		// Fallback: use RGBA() which returns 16-bit components; >>8 to 8-bit.
+		r16, g16, b16, _ := c.RGBA()
+		return Color{
+			Kind: ColorRGB,
+			R:    uint8(r16 >> 8),
+			G:    uint8(g16 >> 8),
+			B:    uint8(b16 >> 8),
+		}
+	}
+}
+
+// attrsFrom maps ultraviolet Style attrs to our Attr bitset.
+func attrsFrom(s uv.Style) Attr {
 	var a Attr
-	m := int(mode)
-	if m&vtAttrReverse != 0 {
+	if s.Attrs&uv.AttrReverse != 0 {
 		a |= AttrReverse
 	}
-	if m&vtAttrUnderline != 0 {
+	if s.Underline != uv.UnderlineNone {
 		a |= AttrUnderline
 	}
-	if m&vtAttrBold != 0 {
+	if s.Attrs&uv.AttrBold != 0 {
 		a |= AttrBold
 	}
-	if m&vtAttrItalic != 0 {
+	if s.Attrs&uv.AttrItalic != 0 {
 		a |= AttrItalic
 	}
-	if m&vtAttrBlink != 0 {
+	if s.Attrs&uv.AttrBlink != 0 {
 		a |= AttrBlink
 	}
 	return a
-}
-
-// decodeColor untangles the vt10x Color packing:
-//
-//	value >= 1<<24      -> default sentinel (DefaultFG/BG/Cursor)
-//	value in [0, 255]   -> palette index (ANSI 0..15 or 256-color 16..255)
-//	value in (255, 1<<24) -> 24-bit truecolor RGB (r<<16 | g<<8 | b)
-//
-// The (255, 1<<24) range is how setAttr stores `38;2;r;g;b`. There is a known,
-// benign ambiguity: a truecolor value of pure blue 0..255 (r=0,g=0,b<=255)
-// collides with a 256-palette index. claude's truecolor output overwhelmingly
-// has a non-zero r or g component, so this does not affect P0 fidelity.
-func decodeColor(c vt10x.Color) Color {
-	v := uint32(c)
-	if v >= 1<<24 {
-		return Color{Kind: ColorDefault}
-	}
-	if v <= 255 {
-		return Color{Kind: ColorPalette, Palette: uint8(v)}
-	}
-	return Color{
-		Kind: ColorRGB,
-		R:    uint8((v >> 16) & 0xff),
-		G:    uint8((v >> 8) & 0xff),
-		B:    uint8(v & 0xff),
-	}
 }

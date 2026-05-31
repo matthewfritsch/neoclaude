@@ -1,5 +1,3 @@
-// Package app is the root Bubble Tea model for neoclaude. It wires the
-// registry, mode FSM, cmdline widget, and per-buffer vt emulators together.
 package app
 
 import "github.com/matthewfritsch/neoclaude/internal/buffer"

@@ -24,9 +24,11 @@ func (m *Model) dispatch(line string) tea.Cmd {
 		return m.cmdNew(arg)
 	case "bn":
 		m.reg.Next()
+		m.logActive("bn")
 		return nil
 	case "bp":
 		m.reg.Prev()
+		m.logActive("bp")
 		return nil
 	case "bd":
 		m.cmdBd()
@@ -94,6 +96,19 @@ func (m *Model) cmdNew(path string) tea.Cmd {
 
 // bufferAddedMsg is sent after cmdNew completes so Update can trigger a resize.
 type bufferAddedMsg struct{ bufID buffer.ID }
+
+// logActive records the active buffer's vt size + cursor after a switch.
+func (m *Model) logActive(via string) {
+	b := m.reg.Active()
+	if b == nil {
+		dlog("switch(%s) -> no active buffer", via)
+		return
+	}
+	cx, cy, cv := b.VT.Cursor()
+	vc, vr := b.VT.Size()
+	dlog("switch(%s) -> buf=%d idx=%d vtsize=%dx%d cursor=(%d,%d,vis=%v)",
+		via, int(b.ID), m.reg.ActiveIndex(), vc, vr, cx, cy, cv)
+}
 
 // cmdBd kills and removes the active buffer.
 func (m *Model) cmdBd() {

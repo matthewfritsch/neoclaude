@@ -22,8 +22,8 @@ func TestSnapshotBasicText(t *testing.T) {
 	}
 }
 
-// TestTruecolorPassthrough is the core R1 validation: a 24-bit SGR color must
-// survive into the grid as an exact RGB triple (not quantized).
+// TestTruecolorPassthrough validates that a 24-bit SGR color survives into
+// the grid as an exact RGB triple (not quantized).
 func TestTruecolorPassthrough(t *testing.T) {
 	v := New(5, 1)
 	v.Write([]byte("\x1b[38;2;255;128;64mX\x1b[0m"))
@@ -102,5 +102,53 @@ func TestResize(t *testing.T) {
 	}
 	if g := v.Snapshot(); g.Cols != 20 || g.Rows != 8 {
 		t.Errorf("grid after resize: got %dx%d want 20x8", g.Cols, g.Rows)
+	}
+}
+
+// TestKbdProtocolNoCursorJump is the regression test for the bug that motivated
+// the migration from hinshun/vt10x to charmbracelet/x/vt.
+//
+// claude emits Kitty keyboard protocol push/pop and xterm modifyOtherKeys
+// sequences on startup.  With vt10x these caused the cursor to jump to row 0.
+// The chunk captured in the wild was: \e[<u \e[>1u \e[>4;2m
+//
+// This test verifies that feeding those sequences does NOT move the cursor.
+func TestKbdProtocolNoCursorJump(t *testing.T) {
+	v := New(80, 24)
+	// Place cursor at a known position (row 5, col 10) by writing lines.
+	v.Write([]byte("\x1b[6;11H")) // CUP row=6 col=11 (1-based)
+	x0, y0, _ := v.Cursor()
+	if x0 != 10 || y0 != 5 {
+		t.Fatalf("pre-condition: cursor at (%d,%d) want (10,5)", x0, y0)
+	}
+
+	// Feed the exact problematic sequences from the captured chunk.
+	v.Write([]byte("\x1b[<u"))    // Kitty keyboard: push flags (CSI < u)
+	v.Write([]byte("\x1b[>1u"))   // Kitty keyboard: pop flags (CSI > 1 u)
+	v.Write([]byte("\x1b[>4;2m")) // xterm modifyOtherKeys level 2
+
+	x1, y1, _ := v.Cursor()
+	if x1 != x0 || y1 != y0 {
+		t.Errorf("kbd-protocol sequences moved cursor from (%d,%d) to (%d,%d) — regression!",
+			x0, y0, x1, y1)
+	}
+}
+
+// TestCursorVisibilityToggle verifies that DECTCEM hide/show is tracked.
+func TestCursorVisibilityToggle(t *testing.T) {
+	v := New(10, 5)
+	_, _, vis := v.Cursor()
+	if !vis {
+		t.Error("cursor should start visible")
+	}
+	v.Write([]byte("\x1b[?25l")) // hide cursor
+	_, _, vis = v.Cursor()
+	if vis {
+		t.Error("cursor should be hidden after ?25l")
+	}
+	v.Write([]byte("\x1b[?25h")) // show cursor
+	_, _, vis = v.Cursor()
+	if !vis {
+		t.Error("cursor should be visible after ?25h")
 	}
 }

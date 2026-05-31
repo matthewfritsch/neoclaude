@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -11,6 +12,17 @@ import (
 	"github.com/matthewfritsch/neoclaude/internal/search"
 	"github.com/matthewfritsch/neoclaude/internal/vt"
 )
+
+// byteToRuneCol converts a byte offset within line into a rune (cell) column.
+// search returns byte offsets (regexp), but the renderer highlights by grid
+// column, where ExtractLines maps one cell to one rune. Without this, matches
+// on lines containing multi-byte runes (claude's box-drawing UI) shift right.
+func byteToRuneCol(line string, byteOff int) int {
+	if byteOff > len(line) {
+		byteOff = len(line)
+	}
+	return utf8.RuneCountInString(line[:byteOff])
+}
 
 var searchBarStyle = lipgloss.NewStyle().Reverse(true)
 
@@ -47,7 +59,7 @@ func (s *SearchBar) CurrentHit() (row, col int) {
 		return -1, -1
 	}
 	h := s.hits[s.cursor]
-	return h.Line, h.Col
+	return h.Line, byteToRuneCol(h.Text, h.Col)
 }
 
 // Matches returns render.Match slices for all hits (for blit highlighting).
@@ -62,15 +74,16 @@ func (s *SearchBar) Matches(gridRows int) []render.Match {
 		}
 		out = append(out, render.Match{
 			Row:      h.Line,
-			ColStart: h.Col,
-			ColEnd:   h.MatchEnd,
+			ColStart: byteToRuneCol(h.Text, h.Col),
+			ColEnd:   byteToRuneCol(h.Text, h.MatchEnd),
 		})
 	}
 	return out
 }
 
-// HandleKey processes typing keys in Search mode. n/N are handled by the FSM
-// and surfaced as ActionSearchNext/Prev; only typing arrives here.
+// HandleKey processes typing keys in Search mode: printable runes, space, and
+// backspace all edit the query (so queries may contain n/N/space). Esc is
+// handled by the caller to close the search.
 func (s *SearchBar) HandleKey(k tea.KeyMsg) {
 	switch k.Type {
 	case tea.KeyBackspace:
@@ -78,6 +91,9 @@ func (s *SearchBar) HandleKey(k tea.KeyMsg) {
 			s.query = s.query[:len(s.query)-1]
 			s.reindex()
 		}
+	case tea.KeySpace:
+		s.query += " "
+		s.reindex()
 	case tea.KeyRunes:
 		s.query += string(k.Runes)
 		s.reindex()

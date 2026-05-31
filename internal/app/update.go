@@ -156,13 +156,12 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// --- Search mode: feed typing to bar, let n/N fall through to FSM ---
+	// --- Search mode: feed all typing (incl n/N/space) to the bar; only Esc
+	// falls through to the FSM to close the search. (Vim-style Enter-confirm
+	// then n/N navigation is a planned follow-up.)
 	if cur == mode.Search && k.Type != tea.KeyEsc {
-		isNav := k.Type == tea.KeyRunes && (string(k.Runes) == "n" || string(k.Runes) == "N")
-		if !isNav {
-			m.search.HandleKey(k)
-			return m, nil
-		}
+		m.search.HandleKey(k)
+		return m, nil
 	}
 
 	action, _ := m.fsm.HandleKey(k, time.Now())

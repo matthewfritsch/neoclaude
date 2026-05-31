@@ -28,6 +28,14 @@ func (m *Model) View() string {
 	b := m.reg.Active()
 	body := blitBuf(m, b, width, rows)
 
+	// Overlay: session picker (<leader>sn) floats above everything.
+	if m.sessionPicker.Active() {
+		overlay := m.sessionPicker.View(width, rows)
+		composed := overlayCenter(body, overlay, rows)
+		status := ui.Statusline(m.fsm.Mode(), "Sessions — Enter to switch/resume, Esc to close", "", 0, 0, width)
+		return composed + "\n" + status
+	}
+
 	// Overlay: picker and grep pane float above the buffer grid.
 	if m.picker.Active() {
 		overlay := m.picker.View(width, rows)

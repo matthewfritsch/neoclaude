@@ -3,25 +3,28 @@ package app
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/google/uuid"
 
 	"github.com/matthewfritsch/neoclaude/internal/buffer"
+	"github.com/matthewfritsch/neoclaude/internal/persist"
 	"github.com/matthewfritsch/neoclaude/internal/session"
 	"github.com/matthewfritsch/neoclaude/internal/vt"
 )
 
 // dispatch parses and executes a : command string (without the leading colon).
-// It returns a tea.Cmd for async work (currently only :new spawns a goroutine).
 func (m *Model) dispatch(line string) tea.Cmd {
 	line = strings.TrimSpace(line)
-	cmd, arg, _ := strings.Cut(line, " ")
-	arg = strings.TrimSpace(arg)
+	// Split into verb + rest (rest is the verb's argument, e.g. a path or name).
+	verb, rest, _ := strings.Cut(line, " ")
+	rest = strings.TrimSpace(rest)
 
-	switch cmd {
+	switch verb {
 	case "new":
-		return m.cmdNew(arg)
+		return m.cmdNew(rest)
 	case "bn":
 		m.reg.Next()
 		m.logActive("bn")
@@ -33,22 +36,25 @@ func (m *Model) dispatch(line string) tea.Cmd {
 	case "bd":
 		m.cmdBd()
 		return nil
+	case "name":
+		m.cmdRename(rest)
+		return nil
 	default:
-		// Unknown command: silently ignore for now (P1 simplification).
 		return nil
 	}
 }
 
 // CmdNew is the exported entry point used by main to spawn the initial buffer.
-// Internally it delegates to the same logic as the :new command handler.
 func (m *Model) CmdNew(path string) tea.Cmd { return m.cmdNew(path) }
 
-// cmdNew spawns a new claude buffer with cwd=path (defaults to $PWD).
-// It returns a tea.Cmd that creates the session synchronously but starts the
-// read goroutine only after the program reference is available.
-func (m *Model) cmdNew(path string) tea.Cmd {
+// cmdNew spawns a new claude buffer. args is the optional cwd from :new [path].
+// Name is always derived from the cwd basename and de-duplicated; use :name to
+// rename after spawn.
+func (m *Model) cmdNew(args string) tea.Cmd {
 	return func() tea.Msg {
-		cwd := path
+		cwd := strings.TrimSpace(args)
+
+		// Resolve cwd.
 		if cwd == "" {
 			var err error
 			cwd, err = os.Getwd()
@@ -56,12 +62,14 @@ func (m *Model) cmdNew(path string) tea.Cmd {
 				cwd = "."
 			}
 		}
-		// Expand ~ manually (os.UserHomeDir is cheap).
 		if cwd == "~" || strings.HasPrefix(cwd, "~/") {
 			if home, err := os.UserHomeDir(); err == nil {
 				cwd = home + cwd[1:]
 			}
 		}
+
+		// Derive name from cwd basename, then de-duplicate.
+		name := m.uniqueName(filepath.Base(cwd))
 
 		cols, rows := m.cols, m.rows
 		if cols < 1 {
@@ -71,19 +79,33 @@ func (m *Model) cmdNew(path string) tea.Cmd {
 			rows = 23
 		}
 
-		sess, err := session.Start([]string{"claude"}, cwd, uint16(cols), uint16(rows))
+		// Generate UUID for this session so it can be resumed later.
+		sessID := uuid.New().String()
+
+		sess, err := session.Start(session.Opts{
+			UUID: sessID,
+			Name: name,
+			Cwd:  cwd,
+			Cols: uint16(cols),
+			Rows: uint16(rows),
+		})
 		if err != nil {
-			// Return a ptyExitMsg with the error so the UI can surface it.
 			return PtyExitMsg{BufID: -1, Err: fmt.Errorf("spawn: %w", err)}
 		}
 
 		id := m.reg.NextID()
-		name := fmt.Sprintf("claude-%d", int(id)+1)
 		terminal := vt.New(cols, rows)
-		buf := buffer.New(id, name, cwd, sess, terminal)
+		buf := buffer.New(id, name, cwd, sessID, sess, terminal)
 		m.reg.Add(buf)
 
-		// Start the read goroutine now — Prog is set before any tea.Cmd runs.
+		// Persist immediately so a crash after spawn still records the session.
+		m.store.Upsert(persist.Record{
+			UUID: sessID,
+			Name: name,
+			Cwd:  cwd,
+		})
+		_ = m.store.Save()
+
 		prog := m.Prog
 		go sess.ReadLoop(
 			func(b []byte) { prog.Send(PtyDataMsg{BufID: id, Data: b}) },
@@ -94,8 +116,91 @@ func (m *Model) cmdNew(path string) tea.Cmd {
 	}
 }
 
-// bufferAddedMsg is sent after cmdNew completes so Update can trigger a resize.
+// cmdResume spawns claude --resume <uuid> in the stored cwd and adds a buffer.
+func (m *Model) cmdResume(rec persist.Record) tea.Cmd {
+	return func() tea.Msg {
+		cols, rows := m.cols, m.rows
+		if cols < 1 {
+			cols = 80
+		}
+		if rows < 1 {
+			rows = 23
+		}
+
+		sess, err := session.Resume(rec.UUID, rec.Cwd, uint16(cols), uint16(rows))
+		if err != nil {
+			return PtyExitMsg{BufID: -1, Err: fmt.Errorf("resume: %w", err)}
+		}
+
+		// Keep the same UUID so persistence stays consistent.
+		id := m.reg.NextID()
+		name := m.uniqueName(rec.Name)
+		terminal := vt.New(cols, rows)
+		buf := buffer.New(id, name, rec.Cwd, rec.UUID, sess, terminal)
+		m.reg.Add(buf)
+
+		// Update lastSeen.
+		m.store.Upsert(persist.Record{
+			UUID: rec.UUID,
+			Name: name,
+			Cwd:  rec.Cwd,
+		})
+		_ = m.store.Save()
+
+		prog := m.Prog
+		go sess.ReadLoop(
+			func(b []byte) { prog.Send(PtyDataMsg{BufID: id, Data: b}) },
+			func(e error) { prog.Send(PtyExitMsg{BufID: id, Err: e}) },
+		)
+
+		return bufferAddedMsg{bufID: id}
+	}
+}
+
+// bufferAddedMsg is sent after cmdNew/cmdResume completes so Update can resize.
 type bufferAddedMsg struct{ bufID buffer.ID }
+
+// cmdRename updates the active buffer's neoclaude label, persists it, and also
+// renames the live claude session by forwarding claude's `/rename <name>` slash
+// command into the child PTY.
+//
+// The forward is best-effort: a leading Ctrl-U (0x15) clears claude's input
+// line so a partially-typed prompt doesn't corrupt the command — note this
+// discards any unsent text in claude's input box. The neoclaude label + store
+// are updated regardless of whether the forward takes effect.
+func (m *Model) cmdRename(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	b := m.reg.Active()
+	if b == nil {
+		return
+	}
+	b.Name = name
+	if b.SessionID != "" {
+		m.store.Upsert(persist.Record{
+			UUID: b.SessionID,
+			Name: name,
+			Cwd:  b.Cwd,
+		})
+		_ = m.store.Save()
+	}
+	// Forward to the live claude session: clear the input line, then run
+	// claude's own /rename slash command.
+	if b.Session != nil {
+		_ = b.Session.Write([]byte("\x15/rename " + name + "\r"))
+	}
+}
+
+// cmdBd kills and removes the active buffer.
+func (m *Model) cmdBd() {
+	b := m.reg.Active()
+	if b == nil {
+		return
+	}
+	_ = m.reg.Remove(b.ID)
+}
 
 // logActive records the active buffer's vt size + cursor after a switch.
 func (m *Model) logActive(via string) {
@@ -110,11 +215,20 @@ func (m *Model) logActive(via string) {
 		via, int(b.ID), m.reg.ActiveIndex(), vc, vr, cx, cy, cv)
 }
 
-// cmdBd kills and removes the active buffer.
-func (m *Model) cmdBd() {
-	b := m.reg.Active()
-	if b == nil {
-		return
+// uniqueName returns name if no existing buffer uses it, otherwise appends
+// ~2, ~3, … until a unique name is found.
+func (m *Model) uniqueName(name string) string {
+	used := make(map[string]bool)
+	for _, b := range m.reg.All() {
+		used[b.Name] = true
 	}
-	_ = m.reg.Remove(b.ID)
+	if !used[name] {
+		return name
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s~%d", name, i)
+		if !used[candidate] {
+			return candidate
+		}
+	}
 }

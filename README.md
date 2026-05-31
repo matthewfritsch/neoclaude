@@ -4,7 +4,7 @@ A Neovim-flavored TUI (Go + Bubble Tea) that manages multiple `claude` CLI sessi
 PTY-wrapped "buffers", each rendered through a vt10x terminal emulator and blitted into a
 lipgloss view.
 
-**Status:** WIP — P0 + P1 + P2 landed.
+**Status:** WIP — P0 + P1 + P2 + P3 landed.
 
 ## Completion criteria
 
@@ -40,8 +40,9 @@ Starts in **INSERT** mode — all keys go directly to the active `claude` sessio
 | `Esc` `Esc` (≤300 ms) | INSERT | → NORMAL |
 | `i` / `a` / `Enter` | NORMAL | → INSERT |
 | `:` | NORMAL | → COMMAND (opens command line) |
-| `<leader><leader>` | NORMAL | Open fuzzy buffer picker |
+| `<leader><leader>` | NORMAL | Open fuzzy buffer picker (live buffers) |
 | `<leader>sg` | NORMAL | Live-grep across all buffers |
+| `<leader>sn` | NORMAL | Named-session picker (live + closed/persisted) |
 | `/` | NORMAL | In-buffer incremental search |
 | `n` / `N` | SEARCH | Next / previous match |
 | `v` | NORMAL | → VISUAL (linewise selection) |
@@ -53,10 +54,33 @@ Starts in **INSERT** mode — all keys go directly to the active `claude` sessio
 
 | Command | Effect |
 |---------|--------|
-| `:new [path]` | Spawn a new claude session (optionally in `path`). Tab-completes paths. |
+| `:new [path]` | Spawn a new claude session (optionally in `path`). Tab-completes paths. Name defaults to `basename(path)`. |
+| `:name <NAME>` | Rename the active buffer's neoclaude label and update `sessions.json`. Claude's own display name (set at spawn via `-n`) is unchanged. |
 | `:bn` | Next buffer |
 | `:bp` | Previous buffer |
 | `:bd` | Kill active buffer |
+
+## Named sessions and resume (P3)
+
+Every buffer spawned by `:new` gets a UUID and is launched as:
+
+```
+claude --session-id <uuid> -n <name>
+```
+
+The UUID and name are written to `sessions.json` immediately so even a crash preserves the record.
+
+**Resume a closed session:**
+Double-Esc → NORMAL → `<leader>sn`. The picker shows:
+- **●** Live buffers (switch to them with Enter)
+- **○** Closed/persisted sessions (Enter spawns `claude --resume <uuid>` in its stored cwd — full conversation context is restored by claude)
+
+Sessions survive process restart: `<leader>sn` on a fresh launch still lists prior named sessions.
+
+### Sessions file
+
+`$XDG_STATE_HOME/neoclaude/sessions.json`  
+(defaults to `~/.local/state/neoclaude/sessions.json` when `XDG_STATE_HOME` is unset)
 
 ## Configuration
 

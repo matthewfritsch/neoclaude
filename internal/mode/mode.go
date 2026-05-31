@@ -10,7 +10,8 @@
 //
 // Leader contract (Normal only):
 //   - Pressing the leader key arms leaderPending.
-//   - Next key(s) form a chord: leader+leader → picker, leader+s+g → grep.
+//   - Next key(s) form a chord: leader+leader → picker, leader+s+g → grep,
+//     leader+s+n → named-session picker.
 //   - Any unrecognised follow-up clears pending with no action.
 //   - Leader keys fire ONLY in Normal; in Insert all keys (incl space) go to pty.
 package mode
@@ -56,20 +57,21 @@ func (m Mode) String() string {
 type Action int
 
 const (
-	ActionNone          Action = iota
-	ActionForward              // encode key → write to active session pty
-	ActionQuit                 // Ctrl-C in Normal → graceful quit
-	ActionEnterCommand         // : in Normal → open cmdline
-	ActionExecCommand          // Enter in Command → execute cmdline
-	ActionCancelCommand        // Esc in Command → cancel cmdline
-	ActionOpenPicker           // <leader><leader> → open buffer picker
-	ActionOpenGrep             // <leader>sg → open grep pane
-	ActionOpenSearch           // / in Normal → open in-buffer search bar
-	ActionEnterVisual          // v in Normal → enter Visual mode
-	ActionExitOverlay          // Esc from Search/Visual/Picker → back to Normal
-	ActionSearchNext           // n → next search match
-	ActionSearchPrev           // N → prev search match
-	ActionVisualYank           // y in Visual → yank selection to clipboard
+	ActionNone              Action = iota
+	ActionForward                  // encode key → write to active session pty
+	ActionQuit                     // Ctrl-C in Normal → graceful quit
+	ActionEnterCommand             // : in Normal → open cmdline
+	ActionExecCommand              // Enter in Command → execute cmdline
+	ActionCancelCommand            // Esc in Command → cancel cmdline
+	ActionOpenPicker               // <leader><leader> → open buffer picker
+	ActionOpenGrep                 // <leader>sg → open grep pane
+	ActionOpenNamedSessions        // <leader>sn → open named-session picker
+	ActionOpenSearch               // / in Normal → open in-buffer search bar
+	ActionEnterVisual              // v in Normal → enter Visual mode
+	ActionExitOverlay              // Esc from Search/Visual/Picker → back to Normal
+	ActionSearchNext               // n → next search match
+	ActionSearchPrev               // N → prev search match
+	ActionVisualYank               // y in Visual → yank selection to clipboard
 )
 
 // EscDelay is the window for the double-Esc Insert→Normal chord.
@@ -83,7 +85,7 @@ type FSM struct {
 	escAt      time.Time
 	// leader chord state (Normal only)
 	leaderPending bool
-	leaderSeq     string // keys pressed after leader so far ("s", "sg", …)
+	leaderSeq     string // keys pressed after leader so far ("s", "sg", "sn", …)
 }
 
 // New returns an FSM starting in Insert mode with the default leader (space).
@@ -225,15 +227,17 @@ func (f *FSM) handleLeaderSeq(k tea.KeyMsg) (Action, Mode) {
 
 	f.leaderSeq += string(r)
 
-	// <leader>sg → grep.
-	if f.leaderSeq == "sg" {
+	switch f.leaderSeq {
+	case "sg":
 		f.leaderPending = false
 		f.leaderSeq = ""
 		return ActionOpenGrep, Normal
-	}
-
-	// Partial: "s" could still become "sg" — keep pending.
-	if f.leaderSeq == "s" {
+	case "sn":
+		f.leaderPending = false
+		f.leaderSeq = ""
+		return ActionOpenNamedSessions, Normal
+	case "s":
+		// Partial — keep pending; next key completes "sg" or "sn".
 		return ActionNone, Normal
 	}
 

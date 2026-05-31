@@ -14,8 +14,9 @@ type ID int
 // Buffer is the unit of multi-buffer management: session + vt + metadata.
 type Buffer struct {
 	ID         ID
-	Name       string // short label shown in the statusline
+	Name       string // short label shown in the statusline (neoclaude's own label)
 	Cwd        string // working directory the session was spawned in
+	SessionID  string // UUID passed to claude --session-id (empty for anonymous buffers)
 	Session    *session.Session
 	VT         *vt.VT
 	Scrollback *Ring // plain-text lines that have scrolled off the vt top
@@ -23,11 +24,12 @@ type Buffer struct {
 
 // New creates a Buffer. The caller is responsible for starting the session's
 // ReadLoop and for calling Kill on teardown.
-func New(id ID, name, cwd string, sess *session.Session, terminal *vt.VT) *Buffer {
+func New(id ID, name, cwd, sessionID string, sess *session.Session, terminal *vt.VT) *Buffer {
 	return &Buffer{
 		ID:         id,
 		Name:       name,
 		Cwd:        cwd,
+		SessionID:  sessionID,
 		Session:    sess,
 		VT:         terminal,
 		Scrollback: DefaultRing(),

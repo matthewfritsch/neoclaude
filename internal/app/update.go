@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/matthewfritsch/neoclaude/internal/mode"
+	"github.com/matthewfritsch/neoclaude/internal/persist"
 	"github.com/matthewfritsch/neoclaude/internal/ui"
 	"github.com/matthewfritsch/neoclaude/internal/vt"
 )
@@ -38,9 +39,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if b := m.reg.ByID(msg.BufID); b != nil {
 			b.VT.Write(msg.Data)
 			// Forward any emulator-generated responses (DA replies, CPR,
-			// keyboard-protocol acks) back to the child PTY.  These are
-			// produced by the emulator in reaction to the bytes we just fed it
-			// and must reach the child or it may hang waiting for answers.
+			// keyboard-protocol acks) back to the child PTY.
 			if resp := b.VT.DrainResponses(); len(resp) > 0 {
 				_ = b.Session.Write(resp)
 			}
@@ -76,6 +75,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.grep.SetResults(msg.Query, msg.Hits)
 		return m, nil
 
+	case sessionPickerOpenMsg:
+		m.sessionPicker.Open(msg.entries)
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -86,7 +89,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	cur := m.fsm.Mode()
 
-	// --- Picker overlay ---
+	// --- Session picker overlay (<leader>sn) ---
+	if m.sessionPicker.Active() {
+		if k.Type == tea.KeyEsc {
+			m.sessionPicker.Close()
+			m.fsm.SetMode(mode.Normal)
+			return m, nil
+		}
+		sel, confirmed := m.sessionPicker.HandleKey(k)
+		if confirmed && sel != nil {
+			m.sessionPicker.Close()
+			m.fsm.SetMode(mode.Normal)
+			if sel.IsLive() {
+				// Switch to existing buffer.
+				for i, b := range m.reg.All() {
+					if int(b.ID) == sel.LiveBufID {
+						m.reg.SetActive(i)
+						break
+					}
+				}
+				return m, nil
+			}
+			// Resume a closed session.
+			return m, m.cmdResume(closedRecord(sel))
+		}
+		return m, nil
+	}
+
+	// --- Buffer picker overlay (<leader><leader>) ---
 	if cur == mode.Picker {
 		if k.Type == tea.KeyEsc {
 			m.fsm.SetMode(mode.Normal)
@@ -121,7 +151,6 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.fsm.SetMode(mode.Normal)
 			return m, nil
 		}
-		// Typing updates the live grep query.
 		if k.Type == tea.KeyRunes || k.Type == tea.KeyBackspace || k.Type == tea.KeySpace {
 			q := m.grep.QueryStr()
 			switch k.Type {
@@ -156,9 +185,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// --- Search mode: feed all typing (incl n/N/space) to the bar; only Esc
-	// falls through to the FSM to close the search. (Vim-style Enter-confirm
-	// then n/N navigation is a planned follow-up.)
+	// --- Search mode ---
 	if cur == mode.Search && k.Type != tea.KeyEsc {
 		m.search.HandleKey(k)
 		return m, nil
@@ -202,6 +229,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.grep.Open()
 		return m, m.runGrep("")
 
+	case mode.ActionOpenNamedSessions:
+		return m, m.openSessionPicker()
+
 	case mode.ActionOpenSearch:
 		m.openSearch()
 
@@ -240,6 +270,37 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// openSessionPicker builds the entry list and shows the session picker.
+func (m *Model) openSessionPicker() tea.Cmd {
+	return func() tea.Msg {
+		// Build live entries.
+		openUUIDs := make(map[string]bool)
+		liveEntries := make([]ui.SessionEntry, 0, m.reg.Len())
+		for _, b := range m.reg.All() {
+			if b.SessionID != "" {
+				openUUIDs[b.SessionID] = true
+			}
+			liveEntries = append(liveEntries, ui.SessionEntry{
+				LiveBufID: int(b.ID),
+				UUID:      b.SessionID,
+				Name:      b.Name,
+				Cwd:       b.Cwd,
+				Display:   b.Name + " " + b.Cwd,
+			})
+		}
+		entries := ui.BuildSessionEntries(liveEntries, m.store, openUUIDs)
+		return sessionPickerOpenMsg{entries: entries}
+	}
+}
+
+// sessionPickerOpenMsg triggers the session picker UI to open.
+type sessionPickerOpenMsg struct{ entries []ui.SessionEntry }
+
+// closedRecord reconstructs a persist.Record from a closed SessionEntry.
+func closedRecord(e *ui.SessionEntry) persist.Record {
+	return persist.Record{UUID: e.UUID, Name: e.Name, Cwd: e.Cwd}
 }
 
 func (m *Model) openSearch() {

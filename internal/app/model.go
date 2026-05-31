@@ -5,24 +5,28 @@ import (
 
 	"github.com/matthewfritsch/neoclaude/internal/config"
 	"github.com/matthewfritsch/neoclaude/internal/mode"
+	"github.com/matthewfritsch/neoclaude/internal/persist"
 	"github.com/matthewfritsch/neoclaude/internal/registry"
 	"github.com/matthewfritsch/neoclaude/internal/ui"
 )
 
 // Model is the root Bubble Tea model. It owns the buffer registry, mode FSM,
-// command-line widget, buffer picker, search bar, grep pane, and config.
+// command-line widget, buffer picker, search bar, grep pane, session picker,
+// persist store, and config.
 type Model struct {
 	// Prog is set by main after tea.NewProgram returns so ReadLoop goroutines
 	// can call program.Send.
 	Prog *tea.Program
 
-	cfg     *config.Config
-	reg     *registry.Registry
-	fsm     *mode.FSM
-	cmdline *ui.Cmdline
-	picker  *ui.Picker
-	search  *ui.SearchBar
-	grep    *ui.GrepPane
+	cfg           *config.Config
+	reg           *registry.Registry
+	fsm           *mode.FSM
+	cmdline       *ui.Cmdline
+	picker        *ui.Picker
+	search        *ui.SearchBar
+	grep          *ui.GrepPane
+	sessionPicker *ui.SessionPicker
+	store         *persist.Store
 
 	cols int
 	rows int // terminal rows minus status line
@@ -37,20 +41,23 @@ type Model struct {
 	quitting bool
 }
 
-// New returns a Model with an empty registry. Config is loaded from disk;
-// defaults are used silently on any error.
+// New returns a Model with an empty registry. Config and persist store are
+// loaded from disk; defaults are used silently on any error.
 func New() *Model {
 	cfg, _ := config.Load()
 	reg := registry.New()
+	store, _ := persist.Load()
 	return &Model{
-		cfg:         cfg,
-		reg:         reg,
-		fsm:         mode.NewWithLeader(cfg.LeaderRune),
-		cmdline:     &ui.Cmdline{},
-		picker:      ui.NewPicker(reg),
-		search:      &ui.SearchBar{},
-		grep:        &ui.GrepPane{},
-		needInitial: true,
+		cfg:           cfg,
+		reg:           reg,
+		fsm:           mode.NewWithLeader(cfg.LeaderRune),
+		cmdline:       &ui.Cmdline{},
+		picker:        ui.NewPicker(reg),
+		search:        &ui.SearchBar{},
+		grep:          &ui.GrepPane{},
+		sessionPicker: &ui.SessionPicker{},
+		store:         store,
+		needInitial:   true,
 	}
 }
 

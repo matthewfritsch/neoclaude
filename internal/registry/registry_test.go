@@ -13,7 +13,7 @@ import (
 // or must handle the error). For pure ordering tests we stub session as nil and
 // override Remove.
 func makeBuf(id buffer.ID) *buffer.Buffer {
-	return buffer.New(id, "test", "/tmp", &session.Session{}, vt.New(80, 24))
+	return buffer.New(id, "test", "/tmp", "", &session.Session{}, vt.New(80, 24))
 }
 
 func TestEmptyRegistry(t *testing.T) {

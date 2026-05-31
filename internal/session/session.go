@@ -20,10 +20,47 @@ type Session struct {
 	ptmx *os.File
 }
 
-// Start launches argv on a new PTY sized to cols x rows. argv[0] is the program
-// (e.g. "claude") and is resolved via PATH. cwd, if non-empty, sets the child's
-// working directory.
-func Start(argv []string, cwd string, cols, rows uint16) (*Session, error) {
+// Opts configures how a new session is started.
+type Opts struct {
+	// UUID is passed as --session-id to claude so the session can be resumed
+	// later with Resume(). Required for named sessions; leave empty for the
+	// initial anonymous buffer spawned at startup.
+	UUID string
+	// Name is passed as -n/--name to claude for its own display labelling.
+	// If empty, no -n flag is added.
+	Name string
+	// Cwd is the working directory for the child process.
+	Cwd string
+	// Cols/Rows are the initial PTY dimensions.
+	Cols, Rows uint16
+}
+
+// Start launches a new claude session on a PTY using opts.
+// The argv is always ["claude", ...flags...]; callers provide flags via Opts.
+func Start(opts Opts) (*Session, error) {
+	argv := []string{"claude"}
+	if opts.UUID != "" {
+		argv = append(argv, "--session-id", opts.UUID)
+	}
+	if opts.Name != "" {
+		argv = append(argv, "-n", opts.Name)
+	}
+	return startProcess(argv, opts.Cwd, opts.Cols, opts.Rows)
+}
+
+// Resume spawns a claude session that resumes a prior conversation identified
+// by uuid using claude's own -r/--resume flag. Context is fully restored by
+// claude itself.
+func Resume(uuid, cwd string, cols, rows uint16) (*Session, error) {
+	if uuid == "" {
+		return nil, errors.New("session: resume requires a non-empty uuid")
+	}
+	argv := []string{"claude", "--resume", uuid}
+	return startProcess(argv, cwd, cols, rows)
+}
+
+// startProcess is the shared PTY-launch helper.
+func startProcess(argv []string, cwd string, cols, rows uint16) (*Session, error) {
 	if len(argv) == 0 {
 		return nil, errors.New("session: empty argv")
 	}
@@ -35,6 +72,12 @@ func Start(argv []string, cwd string, cols, rows uint16) (*Session, error) {
 	// on teardown and avoid orphaned grandchildren.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
+	if cols < 1 {
+		cols = 80
+	}
+	if rows < 1 {
+		rows = 24
+	}
 	ws := &pty.Winsize{Rows: rows, Cols: cols}
 	ptmx, err := pty.StartWithSize(cmd, ws)
 	if err != nil {

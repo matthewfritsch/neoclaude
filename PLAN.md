@@ -286,8 +286,21 @@ func Remap(c Color, t *Theme) Color                // ANSI16-index -> theme; tru
 - OSC handling (title/clipboard) surfaced or safely swallowed.
 - Render coalescing: batch rapid `ptyDataMsg` within a frame tick to cut redraws.
 - Theme hot-swap without restart.
+- **Colon-command name completion**: Tab in `:` completes the command verb
+  (`:na`→`:name`), not just the `:new` path arg. cmdline needs a command
+  registry to complete against.
+- **`:commands`**: list available colon commands (verb + one-line help).
+- **`:keybinds`**: show all keybindings → action (NORMAL keys, leader chords,
+  mode-specific). Drive both from a single command/keybind registry so they
+  stay in sync with the real bindings.
+- **Search nav (from P2)**: vim-style — Enter confirms the `/` query, then
+  `n`/`N` navigate hits in Normal mode (currently highlights all + jumps to
+  first; no hit-to-hit nav).
+- **Zellij-style default names**: instead of `basename(cwd)`, default new
+  sessions to a random readable name (adjective-noun, e.g. `cute-otter`).
+  Keep `:name` override and the `~2` de-dup fallback.
 
-**Acceptance (manual):** mouse works inside claude; no flicker under heavy streaming; `:theme` swaps live.
+**Acceptance (manual):** mouse works inside claude; no flicker under heavy streaming; `:theme` swaps live; Tab completes command verbs; `:commands`/`:keybinds` list current bindings; `/`+Enter then `n`/`N` cycles matches.
 
 ---
 

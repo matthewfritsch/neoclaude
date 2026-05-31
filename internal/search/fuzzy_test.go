@@ -13,7 +13,7 @@ func makeReg(names []string) *registry.Registry {
 	reg := registry.New()
 	for i, name := range names {
 		id := buffer.ID(i)
-		b := buffer.New(id, name, "/tmp/"+name, &session.Session{}, vt.New(80, 24))
+		b := buffer.New(id, name, "/tmp/"+name, "", &session.Session{}, vt.New(80, 24))
 		b.ID = id
 		reg.Add(b)
 	}

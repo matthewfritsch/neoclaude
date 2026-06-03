@@ -266,7 +266,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	action, _ := m.fsm.HandleKey(k, time.Now())
+	action, _ := m.fsm.HandleKey(k)
 
 	switch action {
 	case mode.ActionQuit:

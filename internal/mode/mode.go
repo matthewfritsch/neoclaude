@@ -2,11 +2,12 @@
 //
 // Modes: Normal, Insert, Command, Search, Visual, Picker.
 //
-// Double-Esc contract (Insert→Normal):
-//   - First Esc in Insert: arm escPending, record escAt, FORWARD the Esc byte
-//     to the child (so a single Esc still reaches claude).
-//   - Second Esc within EscDelay (300ms): transition to Normal, swallow.
-//   - Any non-Esc key while pending: clear pending, forward normally.
+// Esc contract: Esc is NEVER forwarded to the child PTY.
+//   - Insert: single Esc → Normal immediately.
+//   - Command/Search/Visual/Picker: Esc → Normal (cancel/close).
+//   - Normal: Esc clears overlays (search, etc.) or is a no-op.
+//   Claude uses Ctrl-C for cancel; escape sequences (arrows, etc.) arrive as
+//   distinct key types and are unaffected.
 //
 // Leader contract (Normal only):
 //   - Pressing the leader key arms leaderPending.
@@ -17,8 +18,6 @@
 package mode
 
 import (
-	"time"
-
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -74,15 +73,10 @@ const (
 	ActionVisualYank               // y in Visual → yank selection to clipboard
 )
 
-// EscDelay is the window for the double-Esc Insert→Normal chord.
-const EscDelay = 300 * time.Millisecond
-
 // FSM holds the mode state machine.
 type FSM struct {
-	mode       Mode
-	leader     rune // configured leader rune (default ' ')
-	escPending bool
-	escAt      time.Time
+	mode   Mode
+	leader rune // configured leader rune (default ' ')
 	// leader chord state (Normal only)
 	leaderPending bool
 	leaderSeq     string // keys pressed after leader so far ("s", "sg", "sn", …)
@@ -105,7 +99,6 @@ func (f *FSM) SetLeader(r rune) { f.leader = r }
 // SetMode forces the FSM into a specific mode.
 func (f *FSM) SetMode(m Mode) {
 	f.mode = m
-	f.escPending = false
 	f.leaderPending = false
 	f.leaderSeq = ""
 }
@@ -127,11 +120,11 @@ func effectiveRune(k tea.KeyMsg) (rune, bool) {
 }
 
 // HandleKey processes one key event and returns the action the caller should
-// take plus the (possibly updated) mode. now should be time.Now() from caller.
-func (f *FSM) HandleKey(k tea.KeyMsg, now time.Time) (Action, Mode) {
+// take plus the (possibly updated) mode.
+func (f *FSM) HandleKey(k tea.KeyMsg) (Action, Mode) {
 	switch f.mode {
 	case Insert:
-		return f.handleInsert(k, now)
+		return f.handleInsert(k)
 	case Normal:
 		return f.handleNormal(k)
 	case Command:
@@ -148,18 +141,11 @@ func (f *FSM) HandleKey(k tea.KeyMsg, now time.Time) (Action, Mode) {
 
 // --- Insert ---
 
-func (f *FSM) handleInsert(k tea.KeyMsg, now time.Time) (Action, Mode) {
+func (f *FSM) handleInsert(k tea.KeyMsg) (Action, Mode) {
 	if k.Type == tea.KeyEsc {
-		if f.escPending && now.Sub(f.escAt) <= EscDelay {
-			f.escPending = false
-			f.mode = Normal
-			return ActionNone, Normal
-		}
-		f.escPending = true
-		f.escAt = now
-		return ActionForward, Insert
+		f.mode = Normal
+		return ActionNone, Normal
 	}
-	f.escPending = false
 	return ActionForward, Insert
 }
 

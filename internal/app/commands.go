@@ -274,7 +274,7 @@ func (m *Model) cmdShowKeybinds() {
 		"    Ctrl-C            Quit",
 		"",
 		"  Insert Mode",
-		"    Esc Esc           Return to Normal mode",
+		"    Esc               Return to Normal mode",
 		"",
 		"  Search Mode (/)",
 		"    Enter             Confirm (n/N navigate after)",

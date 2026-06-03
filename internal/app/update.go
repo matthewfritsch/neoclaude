@@ -26,6 +26,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rows = 1
 		}
 		dlog("WindowSize cols=%d rows=%d bufs=%d", m.cols, m.rows, m.reg.Len())
+		// Flush any pending PTY data at the old size before resizing.
+		m.flushPtyPending()
 		for _, b := range m.reg.All() {
 			b.VT.Resize(m.cols, m.rows)
 			_ = b.Session.Resize(uint16(m.cols), uint16(m.rows))
@@ -75,18 +77,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ptyFlushMsg:
 		m.ptyTickRunning = false
-		for id, data := range m.ptyPending {
-			if b := m.reg.ByID(id); b != nil {
-				b.VT.Write(data)
-				if resp := b.VT.DrainResponses(); len(resp) > 0 {
-					_ = b.Session.Write(resp)
-				}
-				if ab := m.reg.Active(); ab != nil && ab.ID == id && m.search.Active() {
-					m.search.UpdateCorpus(b.Scrollback.Lines(), b.VT.Snapshot())
-				}
-			}
-		}
-		m.ptyPending = nil
+		m.flushPtyPending()
 		return m, nil
 
 	case PtyExitMsg:
@@ -397,6 +388,21 @@ func (m *Model) runGrep(query string) tea.Cmd {
 		})
 	}
 	return ui.GrepCmd(query, corpus)
+}
+
+func (m *Model) flushPtyPending() {
+	for id, data := range m.ptyPending {
+		if b := m.reg.ByID(id); b != nil {
+			b.VT.Write(data)
+			if resp := b.VT.DrainResponses(); len(resp) > 0 {
+				_ = b.Session.Write(resp)
+			}
+			if ab := m.reg.Active(); ab != nil && ab.ID == id && m.search.Active() {
+				m.search.UpdateCorpus(b.Scrollback.Lines(), b.VT.Snapshot())
+			}
+		}
+	}
+	m.ptyPending = nil
 }
 
 func (m *Model) handleScroll(k tea.KeyMsg) bool {

@@ -110,11 +110,8 @@ func (r *Registry) Remove(id buffer.ID) error {
 	}
 
 	b := r.bufs[idx]
-	// Kill returns an error we deliberately ignore on removal — the buffer is
-	// gone from our perspective regardless. Close the VT too so its response
-	// drain goroutine exits (otherwise it leaks, blocked on emu.Read).
-	_ = b.Session.Shutdown()
 	_ = b.VT.Close()
+	go b.Session.Shutdown()
 	delete(r.byID, b.ID)
 	r.bufs = append(r.bufs[:idx], r.bufs[idx+1:]...)
 

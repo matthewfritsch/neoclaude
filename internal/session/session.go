@@ -126,9 +126,9 @@ func (s *Session) Resize(cols, rows uint16) error {
 	return pty.Setsize(s.ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 }
 
-// Shutdown sends SIGTERM to the child process group and waits up to 3 seconds
+// Shutdown sends SIGTERM to the child process group and waits up to 5 seconds
 // for a graceful exit. Falls back to SIGKILL if the child doesn't exit in time.
-// This gives Claude a chance to persist its session JSONL.
+// Safe to call from a goroutine — used by registry.Remove so :bd feels instant.
 func (s *Session) Shutdown() error {
 	if s.cmd == nil || s.cmd.Process == nil {
 		return s.closePTY()
@@ -145,7 +145,7 @@ func (s *Session) Shutdown() error {
 
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(5 * time.Second):
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		<-done
 	}

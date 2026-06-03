@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -125,26 +126,47 @@ func (s *Session) Resize(cols, rows uint16) error {
 	return pty.Setsize(s.ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 }
 
-// Kill terminates the child's process group and closes the PTY. It is safe to
-// call more than once.
+// Shutdown sends SIGTERM to the child process group and waits up to 3 seconds
+// for a graceful exit. Falls back to SIGKILL if the child doesn't exit in time.
+// This gives Claude a chance to persist its session JSONL.
+func (s *Session) Shutdown() error {
+	if s.cmd == nil || s.cmd.Process == nil {
+		return s.closePTY()
+	}
+	pid := s.cmd.Process.Pid
+
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = s.cmd.Process.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		<-done
+	}
+	return s.closePTY()
+}
+
+// Kill terminates the child's process group immediately with SIGKILL.
 func (s *Session) Kill() error {
-	var firstErr error
 	if s.cmd != nil && s.cmd.Process != nil {
 		pid := s.cmd.Process.Pid
-		// Negative pid signals the whole process group (Setsid above makes the
-		// child a group leader, so pgid == pid).
 		if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
-			// Fall back to killing just the child if the group signal fails.
-			if err2 := s.cmd.Process.Kill(); err2 != nil {
-				firstErr = err2
-			}
+			_ = s.cmd.Process.Kill()
 		}
 		_, _ = s.cmd.Process.Wait()
 	}
+	return s.closePTY()
+}
+
+func (s *Session) closePTY() error {
 	if s.ptmx != nil {
-		if err := s.ptmx.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
+		return s.ptmx.Close()
 	}
-	return firstErr
+	return nil
 }

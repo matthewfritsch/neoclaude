@@ -30,7 +30,7 @@ func main() {
 	_, runErr := p.Run()
 
 	for _, b := range m.Registry().All() {
-		_ = b.Session.Kill()
+		_ = b.Session.Shutdown()
 	}
 
 	if runErr != nil {

@@ -96,6 +96,19 @@ func (f *FSM) Mode() Mode { return f.mode }
 // SetLeader updates the leader rune (called after config loads).
 func (f *FSM) SetLeader(r rune) { f.leader = r }
 
+// PendingKeys returns the current in-progress chord for display (e.g. "<Space>s").
+// Returns "" when no chord is active.
+func (f *FSM) PendingKeys() string {
+	if !f.leaderPending {
+		return ""
+	}
+	leader := string(f.leader)
+	if f.leader == ' ' {
+		leader = "<Space>"
+	}
+	return leader + f.leaderSeq
+}
+
 // SetMode forces the FSM into a specific mode.
 func (f *FSM) SetMode(m Mode) {
 	f.mode = m

@@ -11,7 +11,8 @@ import (
 )
 
 // Statusline renders the one-line status bar at the bottom of the screen.
-func Statusline(m mode.Mode, name, cwd string, idx, total, width int, pal *theme.Palette) string {
+// pending is the in-progress chord (e.g. "<Space>s"), shown bottom-right.
+func Statusline(m mode.Mode, name, cwd, pending string, idx, total, width int, pal *theme.Palette) string {
 	modeStr := fmt.Sprintf(" %s ", m.String())
 
 	var modeRendered string
@@ -56,10 +57,13 @@ func Statusline(m mode.Mode, name, cwd string, idx, total, width int, pal *theme
 	}
 
 	var right string
+	if pending != "" {
+		right = fmt.Sprintf(" %s ", pending)
+	}
 	if total > 0 {
-		right = fmt.Sprintf(" [%d/%d] ", idx, total)
+		right += fmt.Sprintf("[%d/%d] ", idx, total)
 	} else {
-		right = " "
+		right += " "
 	}
 
 	modeVis := len([]rune(modeStr))

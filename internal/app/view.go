@@ -38,21 +38,21 @@ func (m *Model) View() string {
 		}
 		overlay := renderInfoOverlay(m.infoLines, width, rows, bc)
 		composed := overlayCenter(body, overlay, rows)
-		status := ui.Statusline(m.fsm.Mode(), "Esc to close", "", 0, 0, width, m.palette)
+		status := ui.Statusline(m.fsm.Mode(), "Esc to close", "", "", 0, 0, width, m.palette)
 		return composed + "\n" + status
 	}
 
 	if m.sessionPicker.Active() {
 		overlay := m.sessionPicker.View(width, rows, m.palette)
 		composed := overlayCenter(body, overlay, rows)
-		status := ui.Statusline(m.fsm.Mode(), "Sessions — Enter to switch/resume, Esc to close", "", 0, 0, width, m.palette)
+		status := ui.Statusline(m.fsm.Mode(), "Sessions — Enter to switch/resume, Esc to close", "", "", 0, 0, width, m.palette)
 		return composed + "\n" + status
 	}
 
 	if m.picker.Active() {
 		overlay := m.picker.View(width, rows, m.palette)
 		composed := overlayCenter(body, overlay, rows)
-		status := ui.Statusline(m.fsm.Mode(), activeName(b), activeCwd(b), activeIdx(m), m.reg.Len(), width, m.palette)
+		status := ui.Statusline(m.fsm.Mode(), activeName(b), activeCwd(b), "", activeIdx(m), m.reg.Len(), width, m.palette)
 		return composed + "\n" + status
 	}
 	if m.grep.Active() {
@@ -63,7 +63,7 @@ func (m *Model) View() string {
 		if label == "" {
 			label = "(grep — type to search, Esc to close)"
 		}
-		status := ui.Statusline(m.fsm.Mode(), label, "", 0, 0, width, m.palette)
+		status := ui.Statusline(m.fsm.Mode(), label, "", "", 0, 0, width, m.palette)
 		return composed + "\n" + status
 	}
 
@@ -74,7 +74,7 @@ func (m *Model) View() string {
 	case m.cmdline.Active():
 		bottomRow = m.cmdline.View(width, m.palette)
 	default:
-		bottomRow = ui.Statusline(m.fsm.Mode(), activeName(b), activeCwd(b), activeIdx(m), m.reg.Len(), width, m.palette)
+		bottomRow = ui.Statusline(m.fsm.Mode(), activeName(b), activeCwd(b), m.fsm.PendingKeys(), activeIdx(m), m.reg.Len(), width, m.palette)
 	}
 
 	return body + "\n" + bottomRow

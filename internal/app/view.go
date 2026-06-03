@@ -36,7 +36,7 @@ func (m *Model) View() string {
 		if m.palette != nil {
 			bc = m.palette.Border
 		}
-		overlay := renderInfoOverlay(m.infoLines, width, rows, bc)
+		overlay := renderInfoOverlay(m.infoLines, m.infoScroll, width, rows, bc)
 		composed := overlayCenter(body, overlay, rows)
 		status := ui.Statusline(m.fsm.Mode(), "Esc to close", "", "", 0, 0, width, m.palette)
 		return composed + "\n" + status
@@ -144,7 +144,7 @@ func overlayCenter(body, overlay string, totalRows int) string {
 	return strings.Join(bodyLines, "\n")
 }
 
-func renderInfoOverlay(lines []string, width, height int, borderColor string) string {
+func renderInfoOverlay(lines []string, scroll, width, height int, borderColor string) string {
 	borderStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
 	if borderColor != "" {
 		borderStyle = borderStyle.BorderForeground(lipgloss.Color(borderColor))
@@ -164,7 +164,30 @@ func renderInfoOverlay(lines []string, width, height int, borderColor string) st
 		boxW = 20
 	}
 
-	content := strings.Join(lines, "\n")
+	// Apply scroll: show a window of lines that fits in the overlay.
+	maxVisible := height - 6 // account for border + padding
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+	if scroll > len(lines)-maxVisible {
+		scroll = len(lines) - maxVisible
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	visible := lines[scroll:]
+	if len(visible) > maxVisible {
+		visible = visible[:maxVisible]
+	}
+
+	content := strings.Join(visible, "\n")
+	if scroll > 0 {
+		content = "  ▲ scroll up\n" + content
+	}
+	if scroll+len(visible) < len(lines) {
+		content = content + "\n  ▼ scroll down"
+	}
+
 	box := borderStyle.Width(boxW).Render(content)
 
 	pad := (width - lipgloss.Width(box)) / 2

@@ -8,6 +8,7 @@ import (
 	"github.com/matthewfritsch/neoclaude/internal/buffer"
 	"github.com/matthewfritsch/neoclaude/internal/mode"
 	"github.com/matthewfritsch/neoclaude/internal/persist"
+	"github.com/matthewfritsch/neoclaude/internal/search"
 	"github.com/matthewfritsch/neoclaude/internal/ui"
 	"github.com/matthewfritsch/neoclaude/internal/vt"
 )
@@ -119,10 +120,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	cur := m.fsm.Mode()
 
-	// --- Info overlay (blocks everything) ---
+	// --- Info overlay (blocks everything, scrollable) ---
 	if len(m.infoLines) > 0 {
-		if k.Type == tea.KeyEsc {
+		switch k.Type {
+		case tea.KeyEsc:
 			m.infoLines = nil
+			m.infoScroll = 0
+		case tea.KeyUp:
+			if m.infoScroll > 0 {
+				m.infoScroll--
+			}
+		case tea.KeyDown:
+			m.infoScroll++
+		case tea.KeyRunes:
+			switch string(k.Runes) {
+			case "j":
+				m.infoScroll++
+			case "k":
+				if m.infoScroll > 0 {
+					m.infoScroll--
+				}
+			}
 		}
 		return m, nil
 	}
@@ -134,8 +152,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.fsm.SetMode(mode.Normal)
 			return m, nil
 		}
-		sel, confirmed := m.sessionPicker.HandleKey(k)
-		if confirmed && sel != nil {
+		sel, action := m.sessionPicker.HandleKey(k)
+		switch action {
+		case ui.PickerSelect:
 			m.sessionPicker.Close()
 			m.fsm.SetMode(mode.Normal)
 			if sel.IsLive() {
@@ -148,6 +167,9 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.cmdResume(closedRecord(sel))
+		case ui.PickerDelete:
+			m.store.Delete(sel.UUID)
+			_ = m.store.Save()
 		}
 		return m, nil
 	}
@@ -391,17 +413,25 @@ func (m *Model) runGrep(query string) tea.Cmd {
 			Lines: lines,
 		})
 	}
-	for _, r := range m.store.Closed(openUUIDs) {
-		lines := persist.ExtractSessionText(r.UUID, r.Cwd)
-		if len(lines) > 0 {
-			corpus = append(corpus, ui.GrepCorpusEntry{
-				BufID: -1,
-				Name:  r.Name + " (closed)",
-				Lines: lines,
-			})
+	closed := m.store.Closed(openUUIDs)
+	return func() tea.Msg {
+		for _, r := range closed {
+			lines := persist.ExtractSessionText(r.UUID, r.Cwd)
+			if len(lines) > 0 {
+				corpus = append(corpus, ui.GrepCorpusEntry{
+					BufID: -1,
+					Name:  r.Name + " (closed)",
+					Lines: lines,
+				})
+			}
 		}
+		var allHits []search.Hit
+		for _, e := range corpus {
+			hits := search.SearchBuffer(e.BufID, e.Name, e.Lines, query)
+			allHits = append(allHits, hits...)
+		}
+		return ui.GrepResultMsg{Query: query, Hits: allHits}
 	}
-	return ui.GrepCmd(query, corpus)
 }
 
 func (m *Model) flushPtyPending() {

@@ -44,7 +44,8 @@ type Model struct {
 	visualEnd   int
 
 	// infoLines, when non-nil, renders a centered text overlay (Esc to close).
-	infoLines []string
+	infoLines  []string
+	infoScroll int
 
 	// PTY data batching: accumulate writes and flush on a 16ms tick so the
 	// VT has a complete frame before View() runs. Reduces partial-render

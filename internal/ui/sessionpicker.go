@@ -98,8 +98,17 @@ func (p *SessionPicker) filter() {
 	}
 }
 
+// PickerAction describes what happened after a key press.
+type PickerAction int
+
+const (
+	PickerNone    PickerAction = iota
+	PickerSelect               // Enter — open/resume the entry
+	PickerDelete               // d — delete the closed entry
+)
+
 // HandleKey processes keys inside the picker.
-func (p *SessionPicker) HandleKey(k tea.KeyMsg) (*SessionEntry, bool) {
+func (p *SessionPicker) HandleKey(k tea.KeyMsg) (*SessionEntry, PickerAction) {
 	switch k.Type {
 	case tea.KeyBackspace:
 		if len(p.query) > 0 {
@@ -116,7 +125,7 @@ func (p *SessionPicker) HandleKey(k tea.KeyMsg) (*SessionEntry, bool) {
 		}
 	case tea.KeyEnter:
 		if sel := p.Selected(); sel != nil {
-			return sel, true
+			return sel, PickerSelect
 		}
 	case tea.KeyRunes:
 		switch string(k.Runes) {
@@ -128,12 +137,36 @@ func (p *SessionPicker) HandleKey(k tea.KeyMsg) (*SessionEntry, bool) {
 			if p.cursor < len(p.entries)-1 {
 				p.cursor++
 			}
+		case "d":
+			if sel := p.Selected(); sel != nil && !sel.IsLive() {
+				p.removeAt(p.cursor)
+				return sel, PickerDelete
+			}
 		default:
 			p.query += string(k.Runes)
 			p.filter()
 		}
 	}
-	return nil, false
+	return nil, PickerNone
+}
+
+func (p *SessionPicker) removeAt(idx int) {
+	if idx < 0 || idx >= len(p.entries) {
+		return
+	}
+	uuid := p.entries[idx].UUID
+	// Remove from filtered entries.
+	p.entries = append(p.entries[:idx], p.entries[idx+1:]...)
+	// Remove from all entries.
+	for i, e := range p.all {
+		if e.UUID == uuid {
+			p.all = append(p.all[:i], p.all[i+1:]...)
+			break
+		}
+	}
+	if p.cursor >= len(p.entries) && p.cursor > 0 {
+		p.cursor--
+	}
 }
 
 // View renders the picker overlay.
@@ -151,7 +184,7 @@ func (p *SessionPicker) View(width, height int, pal *theme.Palette) string {
 	maxItems := min(height/2, 12)
 
 	var sb strings.Builder
-	sb.WriteString(titleStyle.Render("  Sessions (live + closed)") + "\n")
+	sb.WriteString(titleStyle.Render("  Sessions") + closedStyle.Render("  d=delete") + "\n")
 	sb.WriteString(fmt.Sprintf("  > %s\n", p.query))
 	sb.WriteString(strings.Repeat("─", boxW-2) + "\n")
 

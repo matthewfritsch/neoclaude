@@ -166,8 +166,54 @@ func (v *VT) DrainResponses() []byte {
 }
 
 // Write feeds raw child output bytes into the emulator.
+// OSC sequences are stripped before writing because the upstream parser
+// treats 0x9C as C1 ST even inside UTF-8 multibyte sequences, causing
+// OSC titles containing non-ASCII (e.g. ✳ = E2 9C B3) to leak their
+// payload to the screen.
 func (v *VT) Write(p []byte) {
-	_, _ = v.emu.Write(p)
+	_, _ = v.emu.Write(stripOSC(p))
+}
+
+// stripOSC removes OSC (Operating System Command) sequences from the byte
+// stream. An OSC starts with ESC ] and is terminated by BEL (0x07) or
+// ST (ESC \). We strip them entirely rather than fixing the C1/UTF-8
+// collision because neoclaude manages its own chrome and doesn't need
+// window titles or other OSC features from the child.
+func stripOSC(p []byte) []byte {
+	// Fast path: no ESC ] in the data.
+	hasOSC := false
+	for i := 0; i+1 < len(p); i++ {
+		if p[i] == 0x1b && p[i+1] == 0x5d {
+			hasOSC = true
+			break
+		}
+	}
+	if !hasOSC {
+		return p
+	}
+
+	out := make([]byte, 0, len(p))
+	i := 0
+	for i < len(p) {
+		if i+1 < len(p) && p[i] == 0x1b && p[i+1] == 0x5d {
+			i += 2
+			for i < len(p) {
+				if p[i] == 0x07 {
+					i++
+					break
+				}
+				if i+1 < len(p) && p[i] == 0x1b && p[i+1] == 0x5c {
+					i += 2
+					break
+				}
+				i++
+			}
+			continue
+		}
+		out = append(out, p[i])
+		i++
+	}
+	return out
 }
 
 // Close releases the emulator, which closes its response pipe and lets the

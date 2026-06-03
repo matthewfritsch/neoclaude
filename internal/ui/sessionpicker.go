@@ -250,10 +250,15 @@ func renderSessionEntry(e SessionEntry, selected bool, maxW int, matchStyle, sel
 }
 
 // BuildSessionEntries assembles the entry list from live buffers and closed records.
+// Closed records are only included if claude's session JSONL exists on disk.
 func BuildSessionEntries(liveEntries []SessionEntry, store *persist.Store, openUUIDs map[string]bool) []SessionEntry {
 	out := make([]SessionEntry, 0, len(liveEntries)+8)
 	out = append(out, liveEntries...)
 	for _, r := range store.Closed(openUUIDs) {
+		if !persist.ClaudeSessionExists(r.UUID, r.Cwd) {
+			store.Delete(r.UUID)
+			continue
+		}
 		out = append(out, SessionEntry{
 			LiveBufID: -1,
 			UUID:      r.UUID,
@@ -262,5 +267,6 @@ func BuildSessionEntries(liveEntries []SessionEntry, store *persist.Store, openU
 			Display:   r.Name + " " + r.Cwd,
 		})
 	}
+	_ = store.Save()
 	return out
 }

@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -46,6 +45,12 @@ func (m *Model) dispatch(line string) tea.Cmd {
 	case "q":
 		m.quitting = true
 		return tea.Quit
+	case "commands":
+		m.cmdShowCommands()
+		return nil
+	case "keybinds":
+		m.cmdShowKeybinds()
+		return nil
 	default:
 		return nil
 	}
@@ -75,8 +80,7 @@ func (m *Model) cmdNew(args string) tea.Cmd {
 			}
 		}
 
-		// Derive name from cwd basename, then de-duplicate.
-		name := m.uniqueName(filepath.Base(cwd))
+		name := m.uniqueName(randomName())
 
 		cols, rows := m.cols, m.rows
 		if cols < 1 {
@@ -126,6 +130,12 @@ func (m *Model) cmdNew(args string) tea.Cmd {
 // cmdResume spawns claude --resume <uuid> in the stored cwd and adds a buffer.
 func (m *Model) cmdResume(rec persist.Record) tea.Cmd {
 	return func() tea.Msg {
+		if !persist.ClaudeSessionExists(rec.UUID, rec.Cwd) {
+			m.store.Delete(rec.UUID)
+			_ = m.store.Save()
+			return PtyExitMsg{BufID: -1, Err: fmt.Errorf("session %s not found in claude storage", rec.UUID)}
+		}
+
 		cols, rows := m.cols, m.rows
 		if cols < 1 {
 			cols = 80
@@ -221,6 +231,60 @@ func (m *Model) cmdTheme(name string) {
 	}
 	m.palette = p
 	m.cfg.Theme = name
+}
+
+func (m *Model) cmdShowCommands() {
+	m.infoLines = []string{
+		"Commands",
+		"",
+		"  :new [path]     Open new buffer",
+		"  :bd             Close active buffer",
+		"  :bn             Next buffer",
+		"  :bp             Previous buffer",
+		"  :name <name>    Rename buffer + claude session",
+		"  :theme <name>   Switch color theme",
+		"  :q              Quit",
+		"  :commands       This help",
+		"  :keybinds       Show keybindings",
+	}
+}
+
+func (m *Model) cmdShowKeybinds() {
+	leader := string(m.cfg.LeaderRune)
+	if leader == " " {
+		leader = "Space"
+	}
+	m.infoLines = []string{
+		"Keybindings",
+		"",
+		"  Normal Mode",
+		"    i, a              Enter Insert mode",
+		"    Enter             Enter Insert mode",
+		"    :                 Open command line",
+		"    /                 Open search",
+		"    v                 Enter Visual mode",
+		fmt.Sprintf("    %s %s        Buffer picker", leader, leader),
+		fmt.Sprintf("    %s s g            Grep all buffers", leader),
+		fmt.Sprintf("    %s s n            Session picker", leader),
+		"    n                 Next search match",
+		"    N                 Previous search match",
+		"    Ctrl-C            Quit",
+		"",
+		"  Insert Mode",
+		"    Esc Esc           Return to Normal mode",
+		"",
+		"  Search Mode (/)",
+		"    Enter             Confirm (n/N navigate after)",
+		"    Esc               Cancel search",
+		"",
+		"  Visual Mode (v)",
+		"    y                 Yank selection to clipboard",
+		"    Esc               Exit visual mode",
+		"",
+		"  Command Line (:)",
+		"    Tab               Complete command/argument",
+		"    Up/Down           History with prefix matching",
+	}
 }
 
 // logActive records the active buffer's vt size + cursor after a switch.

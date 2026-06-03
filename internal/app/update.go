@@ -37,13 +37,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PtyDataMsg:
 		if b := m.reg.ByID(msg.BufID); b != nil {
+			dumpRaw(msg.Data)
 			b.VT.Write(msg.Data)
-			// Forward any emulator-generated responses (DA replies, CPR,
-			// keyboard-protocol acks) back to the child PTY.
 			if resp := b.VT.DrainResponses(); len(resp) > 0 {
 				_ = b.Session.Write(resp)
 			}
-			// Keep search corpus fresh for the active buffer.
 			if ab := m.reg.Active(); ab != nil && ab.ID == msg.BufID && m.search.Active() {
 				m.search.UpdateCorpus(b.Scrollback.Lines(), b.VT.Snapshot())
 			}
@@ -89,6 +87,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	cur := m.fsm.Mode()
 
+	// --- Info overlay (blocks everything) ---
+	if len(m.infoLines) > 0 {
+		if k.Type == tea.KeyEsc {
+			m.infoLines = nil
+		}
+		return m, nil
+	}
+
 	// --- Session picker overlay (<leader>sn) ---
 	if m.sessionPicker.Active() {
 		if k.Type == tea.KeyEsc {
@@ -101,7 +107,6 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sessionPicker.Close()
 			m.fsm.SetMode(mode.Normal)
 			if sel.IsLive() {
-				// Switch to existing buffer.
 				for i, b := range m.reg.All() {
 					if int(b.ID) == sel.LiveBufID {
 						m.reg.SetActive(i)
@@ -110,7 +115,6 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			// Resume a closed session.
 			return m, m.cmdResume(closedRecord(sel))
 		}
 		return m, nil
@@ -185,10 +189,33 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// --- Search mode ---
+	// --- Search mode (typing phase) ---
 	if cur == mode.Search && k.Type != tea.KeyEsc {
+		if k.Type == tea.KeyEnter {
+			m.search.Confirm()
+			m.fsm.SetMode(mode.Normal)
+			return m, nil
+		}
 		m.search.HandleKey(k)
 		return m, nil
+	}
+
+	// --- Normal mode with confirmed search: n/N navigate, Esc clears ---
+	if cur == mode.Normal && m.search.Active() && m.search.Confirmed() {
+		if k.Type == tea.KeyEsc {
+			m.search.Close()
+			return m, nil
+		}
+		if k.Type == tea.KeyRunes {
+			switch string(k.Runes) {
+			case "n":
+				m.search.Next()
+				return m, nil
+			case "N":
+				m.search.Prev()
+				return m, nil
+			}
+		}
 	}
 
 	action, _ := m.fsm.HandleKey(k, time.Now())
@@ -214,6 +241,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case mode.ActionExecCommand:
 		line := m.cmdline.Value()
+		m.cmdline.PushHistory(line)
 		m.cmdline.Close()
 		if cmd := m.dispatch(line); cmd != nil {
 			return m, cmd
@@ -256,7 +284,6 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.picker.Close()
 	}
 
-	// Track visual selection end row while in Visual mode.
 	if m.fsm.Mode() == mode.Visual {
 		if b := m.reg.Active(); b != nil {
 			_, y, _ := b.VT.Cursor()
@@ -275,7 +302,6 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // openSessionPicker builds the entry list and shows the session picker.
 func (m *Model) openSessionPicker() tea.Cmd {
 	return func() tea.Msg {
-		// Build live entries.
 		openUUIDs := make(map[string]bool)
 		liveEntries := make([]ui.SessionEntry, 0, m.reg.Len())
 		for _, b := range m.reg.All() {

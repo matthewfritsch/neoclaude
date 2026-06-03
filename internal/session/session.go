@@ -26,8 +26,7 @@ type Opts struct {
 	// later with Resume(). Required for named sessions; leave empty for the
 	// initial anonymous buffer spawned at startup.
 	UUID string
-	// Name is passed as -n/--name to claude for its own display labelling.
-	// If empty, no -n flag is added.
+	// Name is kept for neoclaude's own display; not passed to claude.
 	Name string
 	// Cwd is the working directory for the child process.
 	Cwd string
@@ -41,9 +40,6 @@ func Start(opts Opts) (*Session, error) {
 	argv := []string{"claude"}
 	if opts.UUID != "" {
 		argv = append(argv, "--session-id", opts.UUID)
-	}
-	if opts.Name != "" {
-		argv = append(argv, "-n", opts.Name)
 	}
 	return startProcess(argv, opts.Cwd, opts.Cols, opts.Rows)
 }

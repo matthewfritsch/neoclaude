@@ -27,16 +27,18 @@ func byteToRuneCol(line string, byteOff int) int {
 
 // SearchBar manages the / in-buffer incremental search widget.
 type SearchBar struct {
-	active bool
-	query  string
-	lines  []string // current corpus (scrollback ∪ grid)
-	hits   []search.Hit
-	cursor int // index into hits
+	active    bool
+	confirmed bool // true after Enter confirms; matches stay, bar hides
+	query     string
+	lines     []string // current corpus (scrollback ∪ grid)
+	hits      []search.Hit
+	cursor    int // index into hits
 }
 
 // Open activates the search bar and sets the corpus.
 func (s *SearchBar) Open(lines []string) {
 	s.active = true
+	s.confirmed = false
 	s.query = ""
 	s.hits = nil
 	s.cursor = 0
@@ -44,7 +46,17 @@ func (s *SearchBar) Open(lines []string) {
 }
 
 // Close deactivates the search bar.
-func (s *SearchBar) Close() { s.active = false }
+func (s *SearchBar) Close() {
+	s.active = false
+	s.confirmed = false
+}
+
+// Confirm locks in the current query — matches stay highlighted but the bar
+// hides. n/N navigate in Normal mode until Esc clears.
+func (s *SearchBar) Confirm() { s.confirmed = true }
+
+// Confirmed reports whether the search has been confirmed with Enter.
+func (s *SearchBar) Confirmed() bool { return s.confirmed }
 
 // Active reports visibility.
 func (s *SearchBar) Active() bool { return s.active }

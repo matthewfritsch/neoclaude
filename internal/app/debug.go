@@ -70,3 +70,27 @@ func dlog(format string, args ...any) {
 	}
 	fmt.Fprintf(dbgFile, time.Now().Format("15:04:05.000")+" "+format+"\n", args...)
 }
+
+// Raw PTY dump — captures full byte stream for the first buffer to a separate
+// file for offline analysis of escape sequences.
+var (
+	rawDumpOnce sync.Once
+	rawDumpFile *os.File
+)
+
+func dumpRaw(data []byte) {
+	dbgInit()
+	if !dbgOn {
+		return
+	}
+	rawDumpOnce.Do(func() {
+		f, err := os.Create("/tmp/neoclaude-pty-raw.bin")
+		if err != nil {
+			return
+		}
+		rawDumpFile = f
+	})
+	if rawDumpFile != nil {
+		_, _ = rawDumpFile.Write(data)
+	}
+}

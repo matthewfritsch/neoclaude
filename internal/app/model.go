@@ -37,6 +37,9 @@ type Model struct {
 	visualStart int
 	visualEnd   int
 
+	// infoLines, when non-nil, renders a centered text overlay (Esc to close).
+	infoLines []string
+
 	needInitial bool
 	initialPath string
 
@@ -53,11 +56,16 @@ func New() *Model {
 	if pal == nil {
 		pal = theme.Default()
 	}
+	cmdline := &ui.Cmdline{
+		Completions: map[string][]string{
+			"theme": theme.List(),
+		},
+	}
 	return &Model{
 		cfg:           cfg,
 		reg:           reg,
 		fsm:           mode.NewWithLeader(cfg.LeaderRune),
-		cmdline:       &ui.Cmdline{},
+		cmdline:       cmdline,
 		picker:        ui.NewPicker(reg),
 		search:        &ui.SearchBar{},
 		grep:          &ui.GrepPane{},

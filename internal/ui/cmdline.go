@@ -1,4 +1,3 @@
-// Package ui provides the statusline and command-line widgets for neoclaude.
 package ui
 
 import (
@@ -12,19 +11,30 @@ import (
 	"github.com/matthewfritsch/neoclaude/internal/theme"
 )
 
-// Cmdline is a minimal inline text-input widget for the : command line.
-// It does not depend on charmbracelet/bubbles — just a []rune buffer + cursor.
-type Cmdline struct {
-	buf    []rune
-	cursor int // insertion point (0..len(buf))
-	active bool
+var knownCommands = []string{
+	"bd", "bn", "bp", "commands", "keybinds", "name", "new", "q", "theme",
 }
 
-// Open resets the cmdline and marks it active (called on : in Normal mode).
+// Cmdline is a minimal inline text-input widget for the : command line.
+type Cmdline struct {
+	buf    []rune
+	cursor int
+	active bool
+
+	// Completions maps a command verb to its possible argument values.
+	Completions map[string][]string
+
+	history    []string
+	histIdx    int // -1 = not browsing history
+	histPrefix string
+}
+
+// Open resets the cmdline and marks it active.
 func (c *Cmdline) Open() {
 	c.buf = c.buf[:0]
 	c.cursor = 0
 	c.active = true
+	c.histIdx = -1
 }
 
 // Close marks the cmdline inactive.
@@ -36,21 +46,33 @@ func (c *Cmdline) Active() bool { return c.active }
 // Value returns the current text without the leading colon.
 func (c *Cmdline) Value() string { return string(c.buf) }
 
-// HandleKey processes a key while the cmdline is active. Returns true if the
-// caller should re-render. Enter and Esc are handled by the mode FSM before
-// this is called, so we only see typing keys here.
+// PushHistory records an executed command for up-arrow recall.
+func (c *Cmdline) PushHistory(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	if len(c.history) > 0 && c.history[len(c.history)-1] == line {
+		return
+	}
+	c.history = append(c.history, line)
+}
+
+// HandleKey processes a key while the cmdline is active.
 func (c *Cmdline) HandleKey(k tea.KeyMsg) bool {
 	switch k.Type {
 	case tea.KeyBackspace:
 		if c.cursor > 0 {
 			c.buf = append(c.buf[:c.cursor-1], c.buf[c.cursor:]...)
 			c.cursor--
+			c.histIdx = -1
 		}
 		return true
 
 	case tea.KeyDelete:
 		if c.cursor < len(c.buf) {
 			c.buf = append(c.buf[:c.cursor], c.buf[c.cursor+1:]...)
+			c.histIdx = -1
 		}
 		return true
 
@@ -78,42 +100,116 @@ func (c *Cmdline) HandleKey(k tea.KeyMsg) bool {
 		c.tabComplete()
 		return true
 
+	case tea.KeyUp:
+		c.historyUp()
+		return true
+
+	case tea.KeyDown:
+		c.historyDown()
+		return true
+
 	case tea.KeyRunes:
 		ins := k.Runes
 		c.buf = append(c.buf[:c.cursor], append(ins, c.buf[c.cursor:]...)...)
 		c.cursor += len(ins)
+		c.histIdx = -1
 		return true
 
 	case tea.KeySpace:
 		c.buf = append(c.buf[:c.cursor], append([]rune{' '}, c.buf[c.cursor:]...)...)
 		c.cursor++
+		c.histIdx = -1
 		return true
 	}
 	return false
 }
 
-// tabComplete fills in the longest unambiguous path prefix for the argument of
-// a :new command. If there is exactly one match it appends a trailing slash for
-// directories.
-func (c *Cmdline) tabComplete() {
-	line := string(c.buf)
-	// Only complete the argument to :new.
-	cmd, arg, _ := strings.Cut(line, " ")
-	if strings.TrimSpace(cmd) != "new" {
+func (c *Cmdline) historyUp() {
+	if len(c.history) == 0 {
 		return
 	}
-	matches := CompletePath(arg)
+	if c.histIdx == -1 {
+		c.histPrefix = string(c.buf)
+		c.histIdx = len(c.history)
+	}
+	for i := c.histIdx - 1; i >= 0; i-- {
+		if strings.HasPrefix(c.history[i], c.histPrefix) {
+			c.histIdx = i
+			c.buf = []rune(c.history[i])
+			c.cursor = len(c.buf)
+			return
+		}
+	}
+}
+
+func (c *Cmdline) historyDown() {
+	if c.histIdx == -1 {
+		return
+	}
+	for i := c.histIdx + 1; i < len(c.history); i++ {
+		if strings.HasPrefix(c.history[i], c.histPrefix) {
+			c.histIdx = i
+			c.buf = []rune(c.history[i])
+			c.cursor = len(c.buf)
+			return
+		}
+	}
+	c.histIdx = -1
+	c.buf = []rune(c.histPrefix)
+	c.cursor = len(c.buf)
+}
+
+func (c *Cmdline) tabComplete() {
+	line := string(c.buf)
+	cmd, arg, hasSpace := strings.Cut(line, " ")
+	cmd = strings.TrimSpace(cmd)
+
+	if !hasSpace {
+		var matches []string
+		for _, name := range knownCommands {
+			if strings.HasPrefix(name, cmd) {
+				matches = append(matches, name)
+			}
+		}
+		if len(matches) == 1 {
+			c.buf = []rune(matches[0])
+			c.cursor = len(c.buf)
+		} else if len(matches) > 1 {
+			prefix := longestCommonPrefix(matches)
+			if len(prefix) > len(cmd) {
+				c.buf = []rune(prefix)
+				c.cursor = len(c.buf)
+			}
+		}
+		return
+	}
+
+	switch cmd {
+	case "new":
+		c.completeFromList(cmd, arg, CompletePath(arg))
+	case "theme":
+		if c.Completions != nil {
+			var matches []string
+			for _, name := range c.Completions["theme"] {
+				if strings.HasPrefix(name, arg) {
+					matches = append(matches, name)
+				}
+			}
+			c.completeFromList(cmd, arg, matches)
+		}
+	}
+}
+
+func (c *Cmdline) completeFromList(cmd, arg string, matches []string) {
 	if len(matches) == 0 {
 		return
 	}
 	if len(matches) == 1 {
-		// Replace the arg portion with the single match.
 		newLine := cmd + " " + matches[0]
 		c.buf = []rune(newLine)
 		c.cursor = len(c.buf)
 		return
 	}
-	// Multiple matches: complete to the longest common prefix.
 	prefix := longestCommonPrefix(matches)
 	if len(prefix) > len(arg) {
 		newLine := cmd + " " + prefix
@@ -123,15 +219,12 @@ func (c *Cmdline) tabComplete() {
 }
 
 // CompletePath returns filesystem entries whose path starts with prefix.
-// Directories get a trailing slash appended.
 func CompletePath(prefix string) []string {
-	// Expand ~ at the start.
 	expanded := expandHome(prefix)
 
 	dir := filepath.Dir(expanded)
 	base := filepath.Base(expanded)
 
-	// filepath.Dir of an empty string or bare name returns ".".
 	if expanded == "" || expanded == "." || strings.HasSuffix(expanded, "/") {
 		dir = expanded
 		if dir == "" {
@@ -152,7 +245,6 @@ func CompletePath(prefix string) []string {
 			continue
 		}
 		full := filepath.Join(dir, name)
-		// Restore ~ prefix if the original had it.
 		if strings.HasPrefix(prefix, "~/") || prefix == "~" {
 			home, _ := os.UserHomeDir()
 			if strings.HasPrefix(full, home) {
@@ -194,8 +286,7 @@ func longestCommonPrefix(ss []string) string {
 	return prefix
 }
 
-// View renders the cmdline into a fixed-width string. When inactive it returns
-// an empty string (caller fills the status row).
+// View renders the cmdline into a fixed-width string.
 func (c *Cmdline) View(width int, pal *theme.Palette) string {
 	if !c.active {
 		return ""

@@ -9,11 +9,13 @@
 package persist
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -128,5 +130,95 @@ func (s *Store) ByUUID(uuid string) *Record {
 		}
 	}
 	return nil
+}
+
+// ImportClaudeSessions scans ~/.claude/projects/ for JSONL session files and
+// adds any that aren't already in the store. Returns the number imported.
+func (s *Store) ImportClaudeSessions() (int, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, err
+	}
+	projectsDir := filepath.Join(home, ".claude", "projects")
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return 0, err
+	}
+
+	known := make(map[string]bool, len(s.Records))
+	for _, r := range s.Records {
+		known[r.UUID] = true
+	}
+
+	count := 0
+	for _, dir := range entries {
+		if !dir.IsDir() {
+			continue
+		}
+		cwd := decodeCwd(dir.Name())
+		jsonls, _ := filepath.Glob(filepath.Join(projectsDir, dir.Name(), "*.jsonl"))
+		for _, path := range jsonls {
+			uuid := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+			if known[uuid] {
+				continue
+			}
+			name := extractTitle(path)
+			if name == "" {
+				name = uuid[:8]
+			}
+			s.Upsert(Record{UUID: uuid, Name: name, Cwd: cwd})
+			known[uuid] = true
+			count++
+		}
+	}
+	if count > 0 {
+		_ = s.Save()
+	}
+	return count, nil
+}
+
+// decodeCwd reverses the CWD encoding used by Claude's project directories.
+func decodeCwd(encoded string) string {
+	parts := strings.Split(encoded, "-")
+	if len(parts) < 2 {
+		return "/" + encoded
+	}
+	var path string
+	for i := 1; i < len(parts); i++ {
+		candidate := path + "/" + parts[i]
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			path = candidate
+		} else if path == "" {
+			path = candidate
+		} else {
+			path = path + "-" + parts[i]
+		}
+	}
+	if path == "" {
+		return strings.ReplaceAll(encoded, "-", "/")
+	}
+	return path
+}
+
+// extractTitle reads the first few lines of a JSONL file looking for a
+// custom-title record.
+func extractTitle(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for i := 0; i < 20 && scanner.Scan(); i++ {
+		var rec struct {
+			Type        string `json:"type"`
+			CustomTitle string `json:"customTitle"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &rec) == nil && rec.Type == "custom-title" && rec.CustomTitle != "" {
+			return rec.CustomTitle
+		}
+	}
+	return ""
 }
 

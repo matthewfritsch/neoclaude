@@ -51,6 +51,9 @@ func (m *Model) dispatch(line string) tea.Cmd {
 	case "keybinds":
 		m.cmdShowKeybinds()
 		return nil
+	case "import":
+		m.cmdImport()
+		return nil
 	default:
 		return nil
 	}
@@ -228,6 +231,15 @@ func (m *Model) cmdTheme(name string) {
 	m.cfg.Theme = name
 }
 
+func (m *Model) cmdImport() {
+	n, err := m.store.ImportClaudeSessions()
+	if err != nil {
+		m.infoLines = []string{"Import", "", fmt.Sprintf("  Error: %v", err)}
+		return
+	}
+	m.infoLines = []string{"Import", "", fmt.Sprintf("  Imported %d sessions from ~/.claude/projects/", n)}
+}
+
 func (m *Model) cmdShowCommands() {
 	m.infoLines = []string{
 		"Commands",
@@ -239,6 +251,7 @@ func (m *Model) cmdShowCommands() {
 		"  :name <name>    Rename buffer + claude session",
 		"  :theme <name>   Switch color theme",
 		"  :q              Quit",
+		"  :import         Import sessions from ~/.claude/",
 		"  :commands       This help",
 		"  :keybinds       Show keybindings",
 	}

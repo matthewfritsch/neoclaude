@@ -35,7 +35,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.needInitial {
 			m.needInitial = false
-			return m, m.cmdNew(m.initialPath)
 		}
 		return m, nil
 
@@ -88,10 +87,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if b := m.reg.ByID(msg.BufID); b != nil {
 			_ = m.reg.Remove(b.ID)
 		}
-		if m.reg.Len() == 0 {
-			m.quitting = true
-			return m, tea.Quit
-		}
 		return m, nil
 
 	case bufferAddedMsg:
@@ -100,6 +95,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = b.Session.Resize(uint16(m.cols), uint16(m.rows))
 			dlog("bufferAdded buf=%d resized to %dx%d", int(b.ID), m.cols, m.rows)
 		}
+		m.fsm.SetMode(mode.Insert)
 		return m, nil
 
 	case ui.GrepResultMsg:

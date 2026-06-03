@@ -14,15 +14,16 @@ func rune_(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
-func TestStartsInInsert(t *testing.T) {
+func TestStartsInNormal(t *testing.T) {
 	f := New()
-	if f.Mode() != Insert {
-		t.Fatalf("want Insert got %v", f.Mode())
+	if f.Mode() != Normal {
+		t.Fatalf("want Normal got %v", f.Mode())
 	}
 }
 
 func TestInsertForwardsKeys(t *testing.T) {
 	f := New()
+	f.SetMode(Insert)
 	action, m := f.HandleKey(rune_('a'))
 	if action != ActionForward {
 		t.Errorf("want ActionForward got %v", action)

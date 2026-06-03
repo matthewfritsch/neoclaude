@@ -28,6 +28,11 @@ func (m *Model) View() string {
 	}
 
 	b := m.reg.Active()
+	if b == nil && m.reg.Len() == 0 {
+		body := m.motd(width, rows)
+		status := ui.Statusline(m.fsm.Mode(), "neoclaude", "", m.fsm.PendingKeys(), 0, 0, width, m.palette)
+		return body + "\n" + status
+	}
 	body := blitBuf(m, b, width, rows)
 
 	// Info overlay (highest priority — :commands, :keybinds).
@@ -117,6 +122,54 @@ func blitBuf(m *Model, b *buffer.Buffer, width, rows int) string {
 	}
 
 	return render.Blit(snap, opts)
+}
+
+func (m *Model) motd(width, rows int) string {
+	center := func(s string) string {
+		pad := (width - len([]rune(s))) / 2
+		if pad < 0 {
+			pad = 0
+		}
+		return strings.Repeat(" ", pad) + s
+	}
+
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, center("neoclaude"))
+	lines = append(lines, center("Neovim-flavored Claude Code multiplexer"))
+	lines = append(lines, "")
+	lines = append(lines, center(":new [path]       open a new session"))
+	lines = append(lines, center(":import           import sessions from ~/.claude/"))
+
+	leader := string(m.cfg.LeaderRune)
+	if leader == " " {
+		leader = "Space"
+	}
+	lines = append(lines, center(leader+" s n             resume a previous session"))
+	lines = append(lines, center(":q                quit"))
+	lines = append(lines, "")
+
+	closed := m.store.Closed(nil)
+	if len(closed) > 0 {
+		lines = append(lines, center("--- recent sessions ---"))
+		show := closed
+		if len(show) > 5 {
+			show = show[len(show)-5:]
+		}
+		for i := len(show) - 1; i >= 0; i-- {
+			r := show[i]
+			lines = append(lines, center(r.Name+"  "+r.Cwd))
+		}
+	}
+
+	// Pad to fill the screen.
+	for len(lines) < rows {
+		lines = append(lines, "")
+	}
+	if len(lines) > rows {
+		lines = lines[:rows]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func emptyBody(width, rows int) string {

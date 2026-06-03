@@ -82,12 +82,12 @@ type FSM struct {
 	leaderSeq     string // keys pressed after leader so far ("s", "sg", "sn", …)
 }
 
-// New returns an FSM starting in Insert mode with the default leader (space).
+// New returns an FSM starting in Normal mode with the default leader (space).
 func New() *FSM { return NewWithLeader(' ') }
 
 // NewWithLeader returns an FSM with a specific leader rune.
 func NewWithLeader(leader rune) *FSM {
-	return &FSM{mode: Insert, leader: leader}
+	return &FSM{mode: Normal, leader: leader}
 }
 
 // Mode returns the current mode.

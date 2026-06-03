@@ -378,14 +378,28 @@ func (m *Model) openSearch() {
 }
 
 func (m *Model) runGrep(query string) tea.Cmd {
+	openUUIDs := make(map[string]bool)
 	corpus := make([]ui.GrepCorpusEntry, 0, m.reg.Len())
 	for _, b := range m.reg.All() {
+		if b.SessionID != "" {
+			openUUIDs[b.SessionID] = true
+		}
 		lines := append(b.Scrollback.Lines(), vt.ExtractLines(b.VT.Snapshot())...)
 		corpus = append(corpus, ui.GrepCorpusEntry{
 			BufID: b.ID,
 			Name:  b.Name,
 			Lines: lines,
 		})
+	}
+	for _, r := range m.store.Closed(openUUIDs) {
+		lines := persist.ExtractSessionText(r.UUID, r.Cwd)
+		if len(lines) > 0 {
+			corpus = append(corpus, ui.GrepCorpusEntry{
+				BufID: -1,
+				Name:  r.Name + " (closed)",
+				Lines: lines,
+			})
+		}
 	}
 	return ui.GrepCmd(query, corpus)
 }

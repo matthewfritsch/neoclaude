@@ -200,6 +200,78 @@ func decodeCwd(encoded string) string {
 	return path
 }
 
+// ExtractSessionText reads a JSONL session file and returns all user and
+// assistant text content as lines suitable for grep.
+func ExtractSessionText(uuid, cwd string) []string {
+	path := sessionJSONLPath(uuid, cwd)
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 256*1024), 1024*1024)
+	for scanner.Scan() {
+		var rec struct {
+			Type    string `json:"type"`
+			Message struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &rec) != nil {
+			continue
+		}
+		if rec.Type != "user" && rec.Type != "assistant" {
+			continue
+		}
+		// User messages: content is a plain string.
+		// Assistant messages: content is an array of blocks.
+		var text string
+		if rec.Message.Role == "user" {
+			_ = json.Unmarshal(rec.Message.Content, &text)
+		} else {
+			var blocks []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(rec.Message.Content, &blocks) == nil {
+				for _, b := range blocks {
+					if b.Type == "text" {
+						text += b.Text + "\n"
+					}
+				}
+			}
+		}
+		for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+	return lines
+}
+
+// sessionJSONLPath returns the path to a Claude session JSONL file, or ""
+// if not found. Checks ~/.claude/projects/<encoded-cwd>/<uuid>.jsonl.
+func sessionJSONLPath(uuid, cwd string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	encoded := strings.ReplaceAll(cwd, "/", "-")
+	path := filepath.Join(home, ".claude", "projects", encoded, uuid+".jsonl")
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	return ""
+}
+
 // extractTitle reads the first few lines of a JSONL file looking for a
 // custom-title record.
 func extractTitle(path string) string {

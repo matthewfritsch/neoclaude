@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/matthewfritsch/neoclaude/internal/buffer"
 	"github.com/matthewfritsch/neoclaude/internal/config"
 	"github.com/matthewfritsch/neoclaude/internal/mode"
 	"github.com/matthewfritsch/neoclaude/internal/persist"
@@ -44,6 +45,12 @@ type Model struct {
 
 	// infoLines, when non-nil, renders a centered text overlay (Esc to close).
 	infoLines []string
+
+	// PTY data batching: accumulate writes and flush on a 16ms tick so the
+	// VT has a complete frame before View() runs. Reduces partial-render
+	// artifacts from Claude's multi-chunk screen redraws.
+	ptyPending     map[buffer.ID][]byte
+	ptyTickRunning bool
 
 	needInitial bool
 	initialPath string

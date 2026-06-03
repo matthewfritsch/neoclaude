@@ -13,3 +13,6 @@ type PtyExitMsg struct {
 	BufID buffer.ID
 	Err   error
 }
+
+// ptyFlushMsg triggers flushing batched PTY data to VT emulators.
+type ptyFlushMsg struct{}

@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/matthewfritsch/neoclaude/internal/buffer"
 	"github.com/matthewfritsch/neoclaude/internal/mode"
 	"github.com/matthewfritsch/neoclaude/internal/persist"
 	"github.com/matthewfritsch/neoclaude/internal/ui"
@@ -59,14 +60,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			dumpRaw(msg.Data)
 			b.LastDataAt = time.Now()
 			b.ScrollOffset = 0
-			b.VT.Write(msg.Data)
-			if resp := b.VT.DrainResponses(); len(resp) > 0 {
-				_ = b.Session.Write(resp)
+			if m.ptyPending == nil {
+				m.ptyPending = make(map[buffer.ID][]byte)
 			}
-			if ab := m.reg.Active(); ab != nil && ab.ID == msg.BufID && m.search.Active() {
-				m.search.UpdateCorpus(b.Scrollback.Lines(), b.VT.Snapshot())
+			m.ptyPending[msg.BufID] = append(m.ptyPending[msg.BufID], msg.Data...)
+			if !m.ptyTickRunning {
+				m.ptyTickRunning = true
+				return m, tea.Tick(16*time.Millisecond, func(time.Time) tea.Msg {
+					return ptyFlushMsg{}
+				})
 			}
 		}
+		return m, nil
+
+	case ptyFlushMsg:
+		m.ptyTickRunning = false
+		for id, data := range m.ptyPending {
+			if b := m.reg.ByID(id); b != nil {
+				b.VT.Write(data)
+				if resp := b.VT.DrainResponses(); len(resp) > 0 {
+					_ = b.Session.Write(resp)
+				}
+				if ab := m.reg.Active(); ab != nil && ab.ID == id && m.search.Active() {
+					m.search.UpdateCorpus(b.Scrollback.Lines(), b.VT.Snapshot())
+				}
+			}
+		}
+		m.ptyPending = nil
 		return m, nil
 
 	case PtyExitMsg:

@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -131,17 +130,3 @@ func (s *Store) ByUUID(uuid string) *Record {
 	return nil
 }
 
-// ClaudeSessionExists checks whether claude's own session JSONL file exists
-// for the given UUID and working directory. Claude stores sessions at
-// ~/.claude/projects/<encoded-cwd>/<uuid>.jsonl where encoded-cwd replaces
-// every "/" with "-".
-func ClaudeSessionExists(uuid, cwd string) bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	encoded := strings.ReplaceAll(cwd, "/", "-")
-	path := filepath.Join(home, ".claude", "projects", encoded, uuid+".jsonl")
-	_, err = os.Stat(path)
-	return err == nil
-}

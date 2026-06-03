@@ -128,14 +128,9 @@ func (m *Model) cmdNew(args string) tea.Cmd {
 }
 
 // cmdResume spawns claude --resume <uuid> in the stored cwd and adds a buffer.
+// If Claude can't find the session, it exits immediately and PtyExitMsg cleans up.
 func (m *Model) cmdResume(rec persist.Record) tea.Cmd {
 	return func() tea.Msg {
-		if !persist.ClaudeSessionExists(rec.UUID, rec.Cwd) {
-			m.store.Delete(rec.UUID)
-			_ = m.store.Save()
-			return PtyExitMsg{BufID: -1, Err: fmt.Errorf("session %s not found in claude storage", rec.UUID)}
-		}
-
 		cols, rows := m.cols, m.rows
 		if cols < 1 {
 			cols = 80

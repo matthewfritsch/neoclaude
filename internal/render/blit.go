@@ -41,10 +41,16 @@ type Selection struct {
 type Options struct {
 	CursorX, CursorY int
 	CursorVisible    bool
-	// SearchMatches highlights regex hits. Row/Col values are grid coordinates.
-	SearchMatches []Match
-	// Selection overlays a visual-mode highlight region.
-	Selection Selection
+	SearchMatches    []Match
+	Selection        Selection
+	// ANSI16 remaps child terminal palette indices 0..15 to theme hex colors.
+	// nil means no remap (raw ANSI pass-through).
+	ANSI16 *[16]string
+	// Chrome overlay colors (hex). Empty string = use default ANSI fallback.
+	MatchBg     string
+	MatchFg     string
+	SelectionBg string
+	SelectionFg string
 }
 
 // Blit renders a grid into a multi-line string (lines joined with "\n", no
@@ -91,10 +97,8 @@ func blitRow(sb *strings.Builder, g vt.Grid, y int, opts Options, matchSet map[i
 		hitHere := matchSet != nil && matchSet[x]
 		selHere := selRow
 
-		// Cursor and highlighted cells are each rendered individually to avoid
-		// breaking coalescing logic for the surrounding run.
 		if cursorHere || hitHere || selHere {
-			sb.WriteString(styleForCell(cell, cursorHere, hitHere, selHere).Render(string(cell.Rune)))
+			sb.WriteString(styleForCell(cell, cursorHere, hitHere, selHere, &opts).Render(string(cell.Rune)))
 			x++
 			continue
 		}
@@ -114,7 +118,7 @@ func blitRow(sb *strings.Builder, g vt.Grid, y int, opts Options, matchSet map[i
 			run.WriteRune(next.Rune)
 			x++
 		}
-		sb.WriteString(styleForCell(cell, false, false, false).Render(run.String()))
+		sb.WriteString(styleForCell(cell, false, false, false, &opts).Render(run.String()))
 	}
 }
 
@@ -122,13 +126,18 @@ func sameStyle(a, b vt.Cell) bool {
 	return a.FG == b.FG && a.BG == b.BG && a.Attrs == b.Attrs
 }
 
-func styleForCell(c vt.Cell, cursor, searchHit, selected bool) lipgloss.Style {
+func styleForCell(c vt.Cell, cursor, searchHit, selected bool, opts *Options) lipgloss.Style {
 	s := renderer.NewStyle()
 
-	if fg, ok := colorToLipgloss(c.FG); ok {
+	var ansi16 *[16]string
+	if opts != nil {
+		ansi16 = opts.ANSI16
+	}
+
+	if fg, ok := colorToLipgloss(c.FG, ansi16); ok {
 		s = s.Foreground(fg)
 	}
-	if bg, ok := colorToLipgloss(c.BG); ok {
+	if bg, ok := colorToLipgloss(c.BG, ansi16); ok {
 		s = s.Background(bg)
 	}
 	if c.Attrs&vt.AttrBold != 0 {
@@ -144,8 +153,6 @@ func styleForCell(c vt.Cell, cursor, searchHit, selected bool) lipgloss.Style {
 		s = s.Blink(true)
 	}
 
-	// Priority: cursor > search hit > visual selection > child reverse attr.
-	// XOR child reverse with cursor so a cursor on a reversed cell looks normal.
 	childReverse := c.Attrs&vt.AttrReverse != 0
 	switch {
 	case cursor:
@@ -154,11 +161,17 @@ func styleForCell(c vt.Cell, cursor, searchHit, selected bool) lipgloss.Style {
 			s = s.Reverse(true)
 		}
 	case searchHit:
-		// Yellow background highlight for search matches.
-		s = s.Background(lipgloss.Color("3")).Foreground(lipgloss.Color("0"))
+		if opts != nil && opts.MatchBg != "" {
+			s = s.Background(lipgloss.Color(opts.MatchBg)).Foreground(lipgloss.Color(opts.MatchFg))
+		} else {
+			s = s.Background(lipgloss.Color("3")).Foreground(lipgloss.Color("0"))
+		}
 	case selected:
-		// Blue background for visual selection.
-		s = s.Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15"))
+		if opts != nil && opts.SelectionBg != "" {
+			s = s.Background(lipgloss.Color(opts.SelectionBg)).Foreground(lipgloss.Color(opts.SelectionFg))
+		} else {
+			s = s.Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15"))
+		}
 	default:
 		if childReverse {
 			s = s.Reverse(true)
@@ -167,9 +180,12 @@ func styleForCell(c vt.Cell, cursor, searchHit, selected bool) lipgloss.Style {
 	return s
 }
 
-func colorToLipgloss(c vt.Color) (lipgloss.TerminalColor, bool) {
+func colorToLipgloss(c vt.Color, ansi16 *[16]string) (lipgloss.TerminalColor, bool) {
 	switch c.Kind {
 	case vt.ColorPalette:
+		if ansi16 != nil && c.Palette < 16 && ansi16[c.Palette] != "" {
+			return lipgloss.Color(ansi16[c.Palette]), true
+		}
 		return lipgloss.ANSIColor(c.Palette), true
 	case vt.ColorRGB:
 		return lipgloss.Color(hex(c.R, c.G, c.B)), true

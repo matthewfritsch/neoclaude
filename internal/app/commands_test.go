@@ -6,6 +6,7 @@ import (
 	"github.com/matthewfritsch/neoclaude/internal/buffer"
 	"github.com/matthewfritsch/neoclaude/internal/persist"
 	"github.com/matthewfritsch/neoclaude/internal/registry"
+	"github.com/matthewfritsch/neoclaude/internal/theme"
 	"github.com/matthewfritsch/neoclaude/internal/vt"
 )
 
@@ -18,7 +19,7 @@ func modelForNames(names []string) *Model {
 		reg.Add(buffer.New(id, n, "/tmp", "", nil, vt.New(5, 5)))
 	}
 	store, _ := persist.Load()
-	return &Model{reg: reg, store: store}
+	return &Model{reg: reg, store: store, palette: theme.Default()}
 }
 
 // TestUniqueNameNoConflict: a fresh name is returned unchanged.
@@ -91,7 +92,7 @@ func TestCmdRenameWithSessionIDPersists(t *testing.T) {
 	reg.Add(b)
 	store, _ := persist.Load()
 	store.Upsert(persist.Record{UUID: "test-uuid-1234", Name: "orig", Cwd: "/tmp"})
-	m := &Model{reg: reg, store: store}
+	m := &Model{reg: reg, store: store, palette: theme.Default()}
 
 	m.cmdRename("renamed")
 

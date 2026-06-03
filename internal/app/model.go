@@ -7,6 +7,7 @@ import (
 	"github.com/matthewfritsch/neoclaude/internal/mode"
 	"github.com/matthewfritsch/neoclaude/internal/persist"
 	"github.com/matthewfritsch/neoclaude/internal/registry"
+	"github.com/matthewfritsch/neoclaude/internal/theme"
 	"github.com/matthewfritsch/neoclaude/internal/ui"
 )
 
@@ -27,6 +28,7 @@ type Model struct {
 	grep          *ui.GrepPane
 	sessionPicker *ui.SessionPicker
 	store         *persist.Store
+	palette       *theme.Palette
 
 	cols int
 	rows int // terminal rows minus status line
@@ -47,6 +49,10 @@ func New() *Model {
 	cfg, _ := config.Load()
 	reg := registry.New()
 	store, _ := persist.Load()
+	pal := theme.Get(cfg.Theme)
+	if pal == nil {
+		pal = theme.Default()
+	}
 	return &Model{
 		cfg:           cfg,
 		reg:           reg,
@@ -57,6 +63,7 @@ func New() *Model {
 		grep:          &ui.GrepPane{},
 		sessionPicker: &ui.SessionPicker{},
 		store:         store,
+		palette:       pal,
 		needInitial:   true,
 	}
 }

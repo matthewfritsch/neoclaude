@@ -10,6 +10,7 @@ import (
 
 	"github.com/matthewfritsch/neoclaude/internal/render"
 	"github.com/matthewfritsch/neoclaude/internal/search"
+	"github.com/matthewfritsch/neoclaude/internal/theme"
 	"github.com/matthewfritsch/neoclaude/internal/vt"
 )
 
@@ -23,8 +24,6 @@ func byteToRuneCol(line string, byteOff int) int {
 	}
 	return utf8.RuneCountInString(line[:byteOff])
 }
-
-var searchBarStyle = lipgloss.NewStyle().Reverse(true)
 
 // SearchBar manages the / in-buffer incremental search widget.
 type SearchBar struct {
@@ -132,9 +131,17 @@ func (s *SearchBar) UpdateCorpus(scrollback []string, grid vt.Grid) {
 }
 
 // View renders the one-line search bar for the bottom row.
-func (s *SearchBar) View(width int) string {
+func (s *SearchBar) View(width int, pal *theme.Palette) string {
 	if !s.active {
 		return ""
+	}
+	var style lipgloss.Style
+	if pal != nil {
+		style = lipgloss.NewStyle().
+			Background(lipgloss.Color(pal.Selection)).
+			Foreground(lipgloss.Color(pal.Fg))
+	} else {
+		style = lipgloss.NewStyle().Reverse(true)
 	}
 	count := ""
 	if len(s.hits) > 0 {
@@ -147,5 +154,5 @@ func (s *SearchBar) View(width int) string {
 	if pad < 0 {
 		pad = 0
 	}
-	return searchBarStyle.Render(label + strings.Repeat(" ", pad))
+	return style.Render(label + strings.Repeat(" ", pad))
 }

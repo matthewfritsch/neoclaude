@@ -9,13 +9,7 @@ import (
 
 	"github.com/matthewfritsch/neoclaude/internal/buffer"
 	"github.com/matthewfritsch/neoclaude/internal/search"
-)
-
-var (
-	grepTitle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
-	grepSelected = lipgloss.NewStyle().Reverse(true)
-	grepMatch    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
-	grepPane     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+	"github.com/matthewfritsch/neoclaude/internal/theme"
 )
 
 // GrepResultMsg is sent by the async grep tea.Cmd.
@@ -65,8 +59,7 @@ func (g *GrepPane) SelectedHit() *search.Hit {
 	return &h
 }
 
-// HandleKey processes movement keys inside the pane. Returns the selected
-// buffer.ID when Enter is pressed (-1 otherwise).
+// HandleKey processes movement keys inside the pane.
 func (g *GrepPane) HandleKey(k tea.KeyMsg) (selected buffer.ID, confirm bool) {
 	switch k.Type {
 	case tea.KeyUp:
@@ -97,10 +90,13 @@ func (g *GrepPane) HandleKey(k tea.KeyMsg) (selected buffer.ID, confirm bool) {
 }
 
 // View renders the grep pane overlay.
-func (g *GrepPane) View(width, height int) string {
+func (g *GrepPane) View(width, height int, pal *theme.Palette) string {
 	if !g.active {
 		return ""
 	}
+
+	borderStyle, titleStyle, matchStyle, selStyle := grepStyles(pal)
+
 	boxW := min(width-4, 70)
 	if boxW < 30 {
 		boxW = 30
@@ -108,7 +104,7 @@ func (g *GrepPane) View(width, height int) string {
 	maxItems := min(height/2, 15)
 
 	var sb strings.Builder
-	sb.WriteString(grepTitle.Render(fmt.Sprintf("  Grep: %q", g.query)) + "\n")
+	sb.WriteString(titleStyle.Render(fmt.Sprintf("  Grep: %q", g.query)) + "\n")
 	sb.WriteString(strings.Repeat("─", boxW-2) + "\n")
 
 	start := 0
@@ -121,7 +117,7 @@ func (g *GrepPane) View(width, height int) string {
 	}
 	for i, h := range shown {
 		absIdx := start + i
-		line := renderGrepHit(h, absIdx == g.cursor, boxW-6)
+		line := renderGrepHit(h, absIdx == g.cursor, boxW-6, matchStyle, selStyle)
 		sb.WriteString("  " + line + "\n")
 	}
 	if len(g.hits) == 0 {
@@ -132,7 +128,7 @@ func (g *GrepPane) View(width, height int) string {
 		}
 	}
 
-	box := grepPane.Width(boxW).Render(sb.String())
+	box := borderStyle.Width(boxW).Render(sb.String())
 	pad := (width - lipgloss.Width(box)) / 2
 	if pad < 0 {
 		pad = 0
@@ -146,33 +142,50 @@ func (g *GrepPane) View(width, height int) string {
 	return strings.Join(out, "\n")
 }
 
-func renderGrepHit(h search.Hit, selected bool, maxW int) string {
+func grepStyles(pal *theme.Palette) (border, title, match, sel lipgloss.Style) {
+	if pal != nil {
+		border = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(pal.Border)).
+			Padding(0, 1)
+		title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(pal.Accent))
+		match = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(pal.Match))
+		sel = lipgloss.NewStyle().
+			Background(lipgloss.Color(pal.Selection)).
+			Foreground(lipgloss.Color(pal.Fg))
+	} else {
+		border = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+		title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
+		match = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
+		sel = lipgloss.NewStyle().Reverse(true)
+	}
+	return
+}
+
+func renderGrepHit(h search.Hit, selected bool, maxW int, matchStyle, selStyle lipgloss.Style) string {
 	prefix := fmt.Sprintf("%s:%d ", h.BufName, h.Line+1)
 	text := h.Text
-	// Highlight the match span within the text.
 	var body string
 	if h.Col <= len(text) && h.MatchEnd <= len(text) && h.Col < h.MatchEnd {
 		before := text[:h.Col]
-		matched := grepMatch.Render(text[h.Col:h.MatchEnd])
+		matched := matchStyle.Render(text[h.Col:h.MatchEnd])
 		after := text[h.MatchEnd:]
 		body = before + matched + after
 	} else {
 		body = text
 	}
 	line := prefix + body
-	// Simple visible-length truncation.
 	visRunes := []rune(prefix + text)
 	if len(visRunes) > maxW {
 		line = prefix + string([]rune(text)[:max(0, maxW-len([]rune(prefix))-1)]) + "…"
 	}
 	if selected {
-		return grepSelected.Render(line)
+		return selStyle.Render(line)
 	}
 	return line
 }
 
-// GrepCmd returns a tea.Cmd that runs the grep asynchronously and sends
-// a GrepResultMsg when done. corpus maps bufID → (name, lines).
+// GrepCmd returns a tea.Cmd that runs the grep asynchronously.
 func GrepCmd(query string, corpus []GrepCorpusEntry) tea.Cmd {
 	return func() tea.Msg {
 		var allHits []search.Hit

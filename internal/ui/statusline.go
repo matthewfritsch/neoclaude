@@ -7,36 +7,45 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/matthewfritsch/neoclaude/internal/mode"
-)
-
-var (
-	statusBase  = lipgloss.NewStyle().Reverse(true).Bold(true)
-	modeNormal  = lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(lipgloss.Color("2")) // green
-	modeInsert  = lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(lipgloss.Color("4")) // blue
-	modeCommand = lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(lipgloss.Color("3")) // yellow
+	"github.com/matthewfritsch/neoclaude/internal/theme"
 )
 
 // Statusline renders the one-line status bar at the bottom of the screen.
-// Parameters:
-//
-//	m        — current mode
-//	name     — active buffer name (empty when no buffers open)
-//	cwd      — active buffer cwd
-//	idx      — 1-based active buffer index (0 = no buffers)
-//	total    — total number of open buffers
-//	width    — terminal width to pad/truncate to
-func Statusline(m mode.Mode, name, cwd string, idx, total, width int) string {
+func Statusline(m mode.Mode, name, cwd string, idx, total, width int, pal *theme.Palette) string {
 	modeStr := fmt.Sprintf(" %s ", m.String())
+
 	var modeRendered string
-	switch m {
-	case mode.Normal:
-		modeRendered = modeNormal.Render(modeStr)
-	case mode.Insert:
-		modeRendered = modeInsert.Render(modeStr)
-	case mode.Command:
-		modeRendered = modeCommand.Render(modeStr)
-	default:
-		modeRendered = statusBase.Render(modeStr)
+	var barStyle lipgloss.Style
+
+	if pal != nil {
+		barStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color(pal.Selection)).
+			Foreground(lipgloss.Color(pal.Fg))
+
+		badge := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(pal.Bg))
+		switch m {
+		case mode.Normal:
+			modeRendered = badge.Background(lipgloss.Color(pal.ANSI16[2])).Render(modeStr)
+		case mode.Insert:
+			modeRendered = badge.Background(lipgloss.Color(pal.ANSI16[4])).Render(modeStr)
+		case mode.Command:
+			modeRendered = badge.Background(lipgloss.Color(pal.ANSI16[3])).Render(modeStr)
+		default:
+			modeRendered = badge.Background(lipgloss.Color(pal.Accent)).Render(modeStr)
+		}
+	} else {
+		barStyle = lipgloss.NewStyle().Reverse(true).Bold(true)
+		base := lipgloss.NewStyle().Reverse(true).Bold(true)
+		switch m {
+		case mode.Normal:
+			modeRendered = base.Foreground(lipgloss.Color("2")).Render(modeStr)
+		case mode.Insert:
+			modeRendered = base.Foreground(lipgloss.Color("4")).Render(modeStr)
+		case mode.Command:
+			modeRendered = base.Foreground(lipgloss.Color("3")).Render(modeStr)
+		default:
+			modeRendered = base.Render(modeStr)
+		}
 	}
 
 	var middle string
@@ -53,20 +62,17 @@ func Statusline(m mode.Mode, name, cwd string, idx, total, width int) string {
 		right = " "
 	}
 
-	// Calculate visible widths (approximation: count runes, not ANSI bytes).
 	modeVis := len([]rune(modeStr))
 	rightVis := len([]rune(right))
 	midMax := width - modeVis - rightVis
 	if midMax < 0 {
 		midMax = 0
 	}
-	// Truncate middle if needed.
 	midRunes := []rune(middle)
 	if len(midRunes) > midMax {
 		midRunes = midRunes[:midMax]
 	}
-	// Pad middle to fill the gap between mode and right sections.
 	padded := string(midRunes) + strings.Repeat(" ", midMax-len(midRunes))
 
-	return modeRendered + statusBase.Render(padded+right)
+	return modeRendered + barStyle.Render(padded+right)
 }

@@ -73,13 +73,13 @@ func TestBlitCursorOverlay(t *testing.T) {
 
 // TestColorToLipgloss validates color decoding decisions.
 func TestColorToLipgloss(t *testing.T) {
-	if _, ok := colorToLipgloss(vt.Color{Kind: vt.ColorDefault}); ok {
+	if _, ok := colorToLipgloss(vt.Color{Kind: vt.ColorDefault}, nil); ok {
 		t.Error("default color should report ok=false")
 	}
-	if _, ok := colorToLipgloss(vt.Color{Kind: vt.ColorPalette, Palette: 3}); !ok {
+	if _, ok := colorToLipgloss(vt.Color{Kind: vt.ColorPalette, Palette: 3}, nil); !ok {
 		t.Error("palette color should report ok=true")
 	}
-	if _, ok := colorToLipgloss(vt.Color{Kind: vt.ColorRGB, R: 1, G: 2, B: 3}); !ok {
+	if _, ok := colorToLipgloss(vt.Color{Kind: vt.ColorRGB, R: 1, G: 2, B: 3}, nil); !ok {
 		t.Error("rgb color should report ok=true")
 	}
 }

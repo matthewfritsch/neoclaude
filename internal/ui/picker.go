@@ -9,13 +9,7 @@ import (
 
 	"github.com/matthewfritsch/neoclaude/internal/registry"
 	"github.com/matthewfritsch/neoclaude/internal/search"
-)
-
-var (
-	pickerBorder   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
-	pickerSelected = lipgloss.NewStyle().Reverse(true)
-	pickerMatch    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
-	pickerTitle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
+	"github.com/matthewfritsch/neoclaude/internal/theme"
 )
 
 // Picker is the <leader><leader> fuzzy buffer picker overlay.
@@ -59,8 +53,7 @@ func (p *Picker) refresh() {
 	}
 }
 
-// HandleKey processes picker-mode keys. Returns true if the caller should
-// re-render. Enter/Esc are handled by the FSM; only typing/movement arrives.
+// HandleKey processes picker-mode keys.
 func (p *Picker) HandleKey(k tea.KeyMsg) bool {
 	switch k.Type {
 	case tea.KeyBackspace:
@@ -99,10 +92,13 @@ func (p *Picker) HandleKey(k tea.KeyMsg) bool {
 }
 
 // View renders the picker overlay centred in width x height.
-func (p *Picker) View(width, height int) string {
+func (p *Picker) View(width, height int, pal *theme.Palette) string {
 	if !p.active {
 		return ""
 	}
+
+	borderStyle, titleStyle, matchStyle, selStyle := pickerStyles(pal)
+
 	boxW := min(width-4, 60)
 	if boxW < 20 {
 		boxW = 20
@@ -110,7 +106,7 @@ func (p *Picker) View(width, height int) string {
 	maxItems := min(height/2, 10)
 
 	var sb strings.Builder
-	sb.WriteString(pickerTitle.Render("  Buffers") + "\n")
+	sb.WriteString(titleStyle.Render("  Buffers") + "\n")
 	sb.WriteString(fmt.Sprintf("  > %s\n", p.query))
 	sb.WriteString(strings.Repeat("─", boxW-2) + "\n")
 
@@ -124,15 +120,14 @@ func (p *Picker) View(width, height int) string {
 	}
 	for i, e := range shown {
 		absIdx := start + i
-		line := renderEntry(e, absIdx == p.cursor, boxW-4)
+		line := renderEntry(e, absIdx == p.cursor, boxW-4, matchStyle, selStyle)
 		sb.WriteString("  " + line + "\n")
 	}
 	if len(p.entries) == 0 {
 		sb.WriteString("  (no matches)\n")
 	}
 
-	box := pickerBorder.Width(boxW).Render(sb.String())
-	// Centre horizontally.
+	box := borderStyle.Width(boxW).Render(sb.String())
 	pad := (width - lipgloss.Width(box)) / 2
 	if pad < 0 {
 		pad = 0
@@ -146,8 +141,27 @@ func (p *Picker) View(width, height int) string {
 	return strings.Join(out, "\n")
 }
 
-func renderEntry(e search.BufEntry, selected bool, maxW int) string {
-	// Build display with match characters bolded.
+func pickerStyles(pal *theme.Palette) (border, title, match, sel lipgloss.Style) {
+	if pal != nil {
+		border = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(pal.Border)).
+			Padding(0, 1)
+		title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(pal.Accent))
+		match = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(pal.Match))
+		sel = lipgloss.NewStyle().
+			Background(lipgloss.Color(pal.Selection)).
+			Foreground(lipgloss.Color(pal.Fg))
+	} else {
+		border = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+		title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
+		match = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
+		sel = lipgloss.NewStyle().Reverse(true)
+	}
+	return
+}
+
+func renderEntry(e search.BufEntry, selected bool, maxW int, matchStyle, selStyle lipgloss.Style) string {
 	runes := []rune(e.Display)
 	matchSet := make(map[int]bool, len(e.MatchSpans))
 	for _, idx := range e.MatchSpans {
@@ -158,16 +172,14 @@ func renderEntry(e search.BufEntry, selected bool, maxW int) string {
 	var sb strings.Builder
 	for i, r := range runes {
 		if matchSet[i] {
-			sb.WriteString(pickerMatch.Render(string(r)))
+			sb.WriteString(matchStyle.Render(string(r)))
 		} else {
 			sb.WriteRune(r)
 		}
 	}
 	line := sb.String()
-	// Truncate visible length to maxW.
 	visLen := lipgloss.Width(line)
 	if visLen > maxW {
-		// Truncate raw display instead (ANSI makes exact truncation hard).
 		disp := []rune(e.Display)
 		if len(disp) > maxW-1 {
 			disp = disp[:maxW-1]
@@ -175,7 +187,7 @@ func renderEntry(e search.BufEntry, selected bool, maxW int) string {
 		line = string(disp) + "…"
 	}
 	if selected {
-		return pickerSelected.Render(line)
+		return selStyle.Render(line)
 	}
 	return line
 }

@@ -9,22 +9,13 @@ import (
 	"github.com/sahilm/fuzzy"
 
 	"github.com/matthewfritsch/neoclaude/internal/persist"
-)
-
-var (
-	spBorder   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
-	spSelected = lipgloss.NewStyle().Reverse(true)
-	spLive     = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green — live buffer
-	spClosed   = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // grey  — closed session
-	spTitle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
-	spMatch    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
+	"github.com/matthewfritsch/neoclaude/internal/theme"
 )
 
 // SessionEntry is one item in the named-session picker.
 type SessionEntry struct {
-	// Exactly one of the following is set:
-	LiveBufID  int    // >= 0 means this is a live buffer; -1 means closed
-	UUID       string // non-empty for closed sessions
+	LiveBufID  int // >= 0 means this is a live buffer; -1 means closed
+	UUID       string
 	Name       string
 	Cwd        string
 	Display    string // fuzzy-matched string
@@ -44,13 +35,13 @@ type SessionPickerChoiceMsg struct {
 	Entry SessionEntry
 }
 
-// SessionPicker is the <leader>sn overlay: live buffers + closed persisted sessions.
+// SessionPicker is the <leader>sn overlay.
 type SessionPicker struct {
 	active  bool
 	query   string
 	cursor  int
-	all     []SessionEntry // full unfiltered list
-	entries []SessionEntry // current filtered+ranked list
+	all     []SessionEntry
+	entries []SessionEntry
 }
 
 // Open populates and shows the picker.
@@ -107,8 +98,7 @@ func (p *SessionPicker) filter() {
 	}
 }
 
-// HandleKey processes keys inside the picker. Returns (entry, true) when the
-// user confirms a selection (Enter), (nil, false) otherwise.
+// HandleKey processes keys inside the picker.
 func (p *SessionPicker) HandleKey(k tea.KeyMsg) (*SessionEntry, bool) {
 	switch k.Type {
 	case tea.KeyBackspace:
@@ -147,10 +137,13 @@ func (p *SessionPicker) HandleKey(k tea.KeyMsg) (*SessionEntry, bool) {
 }
 
 // View renders the picker overlay.
-func (p *SessionPicker) View(width, height int) string {
+func (p *SessionPicker) View(width, height int, pal *theme.Palette) string {
 	if !p.active {
 		return ""
 	}
+
+	borderStyle, titleStyle, matchStyle, selStyle, liveStyle, closedStyle := sessionStyles(pal)
+
 	boxW := min(width-4, 65)
 	if boxW < 24 {
 		boxW = 24
@@ -158,7 +151,7 @@ func (p *SessionPicker) View(width, height int) string {
 	maxItems := min(height/2, 12)
 
 	var sb strings.Builder
-	sb.WriteString(spTitle.Render("  Sessions (live + closed)") + "\n")
+	sb.WriteString(titleStyle.Render("  Sessions (live + closed)") + "\n")
 	sb.WriteString(fmt.Sprintf("  > %s\n", p.query))
 	sb.WriteString(strings.Repeat("─", boxW-2) + "\n")
 
@@ -172,14 +165,14 @@ func (p *SessionPicker) View(width, height int) string {
 	}
 	for i, e := range shown {
 		absIdx := start + i
-		line := renderSessionEntry(e, absIdx == p.cursor, boxW-4)
+		line := renderSessionEntry(e, absIdx == p.cursor, boxW-4, matchStyle, selStyle, liveStyle, closedStyle)
 		sb.WriteString("  " + line + "\n")
 	}
 	if len(p.entries) == 0 {
 		sb.WriteString("  (no sessions)\n")
 	}
 
-	box := spBorder.Width(boxW).Render(sb.String())
+	box := borderStyle.Width(boxW).Render(sb.String())
 	pad := (width - lipgloss.Width(box)) / 2
 	if pad < 0 {
 		pad = 0
@@ -193,8 +186,31 @@ func (p *SessionPicker) View(width, height int) string {
 	return strings.Join(out, "\n")
 }
 
-func renderSessionEntry(e SessionEntry, selected bool, maxW int) string {
-	// Build label: highlight fuzzy match chars.
+func sessionStyles(pal *theme.Palette) (border, title, match, sel, live, closed lipgloss.Style) {
+	if pal != nil {
+		border = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(pal.Border)).
+			Padding(0, 1)
+		title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(pal.Accent))
+		match = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(pal.Match))
+		sel = lipgloss.NewStyle().
+			Background(lipgloss.Color(pal.Selection)).
+			Foreground(lipgloss.Color(pal.Fg))
+		live = lipgloss.NewStyle().Foreground(lipgloss.Color(pal.ANSI16[2]))
+		closed = lipgloss.NewStyle().Foreground(lipgloss.Color(pal.Muted))
+	} else {
+		border = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+		title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
+		match = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
+		sel = lipgloss.NewStyle().Reverse(true)
+		live = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+		closed = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	}
+	return
+}
+
+func renderSessionEntry(e SessionEntry, selected bool, maxW int, matchStyle, selStyle, liveStyle, closedStyle lipgloss.Style) string {
 	runes := []rune(e.Display)
 	matchSet := make(map[int]bool, len(e.MatchSpans))
 	for _, idx := range e.MatchSpans {
@@ -205,21 +221,19 @@ func renderSessionEntry(e SessionEntry, selected bool, maxW int) string {
 	var sb strings.Builder
 	for i, r := range runes {
 		if matchSet[i] {
-			sb.WriteString(spMatch.Render(string(r)))
+			sb.WriteString(matchStyle.Render(string(r)))
 		} else {
 			sb.WriteRune(r)
 		}
 	}
 	label := sb.String()
 
-	// Colour by live/closed status.
 	if e.IsLive() {
-		label = spLive.Render("● ") + label
+		label = liveStyle.Render("● ") + label
 	} else {
-		label = spClosed.Render("○ ") + label + spClosed.Render(" (closed)")
+		label = closedStyle.Render("○ ") + label + closedStyle.Render(" (closed)")
 	}
 
-	// Simple truncation.
 	visLen := lipgloss.Width(label)
 	if visLen > maxW {
 		raw := []rune(e.Display)
@@ -230,18 +244,15 @@ func renderSessionEntry(e SessionEntry, selected bool, maxW int) string {
 	}
 
 	if selected {
-		return spSelected.Render(label)
+		return selStyle.Render(label)
 	}
 	return label
 }
 
-// BuildSessionEntries assembles the entry list for the session picker from live
-// buffers (via liveEntries) and closed persisted records.
+// BuildSessionEntries assembles the entry list from live buffers and closed records.
 func BuildSessionEntries(liveEntries []SessionEntry, store *persist.Store, openUUIDs map[string]bool) []SessionEntry {
 	out := make([]SessionEntry, 0, len(liveEntries)+8)
-	// Live buffers first.
 	out = append(out, liveEntries...)
-	// Closed persisted sessions.
 	for _, r := range store.Closed(openUUIDs) {
 		out = append(out, SessionEntry{
 			LiveBufID: -1,

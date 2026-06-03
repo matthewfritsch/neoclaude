@@ -8,6 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/matthewfritsch/neoclaude/internal/theme"
 )
 
 // Cmdline is a minimal inline text-input widget for the : command line.
@@ -192,18 +194,21 @@ func longestCommonPrefix(ss []string) string {
 	return prefix
 }
 
-var (
-	cmdlineStyle = lipgloss.NewStyle().Reverse(true)
-)
-
 // View renders the cmdline into a fixed-width string. When inactive it returns
 // an empty string (caller fills the status row).
-func (c *Cmdline) View(width int) string {
+func (c *Cmdline) View(width int, pal *theme.Palette) string {
 	if !c.active {
 		return ""
 	}
-	// Build the display: ":<before-cursor>|<after-cursor>" where | is the
-	// cursor rendered as a reversed block.
+	var cursorStyle lipgloss.Style
+	if pal != nil {
+		cursorStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color(pal.Fg)).
+			Foreground(lipgloss.Color(pal.Bg))
+	} else {
+		cursorStyle = lipgloss.NewStyle().Reverse(true)
+	}
+
 	before := ":" + string(c.buf[:c.cursor])
 	after := string(c.buf[c.cursor:])
 
@@ -213,10 +218,9 @@ func (c *Cmdline) View(width int) string {
 		after = string(c.buf[c.cursor+1:])
 	}
 
-	cursorRendered := cmdlineStyle.Render(cursorChar)
+	cursorRendered := cursorStyle.Render(cursorChar)
 	line := before + cursorRendered + after
 
-	// Pad to width so the row is fully filled.
 	visible := len([]rune(before)) + len([]rune(cursorChar)) + len([]rune(after))
 	if visible < width {
 		line += strings.Repeat(" ", width-visible)

@@ -12,6 +12,7 @@ import (
 	"github.com/matthewfritsch/neoclaude/internal/buffer"
 	"github.com/matthewfritsch/neoclaude/internal/persist"
 	"github.com/matthewfritsch/neoclaude/internal/session"
+	"github.com/matthewfritsch/neoclaude/internal/theme"
 	"github.com/matthewfritsch/neoclaude/internal/vt"
 )
 
@@ -39,6 +40,12 @@ func (m *Model) dispatch(line string) tea.Cmd {
 	case "name":
 		m.cmdRename(rest)
 		return nil
+	case "theme":
+		m.cmdTheme(rest)
+		return nil
+	case "q":
+		m.quitting = true
+		return tea.Quit
 	default:
 		return nil
 	}
@@ -200,6 +207,20 @@ func (m *Model) cmdBd() {
 		return
 	}
 	_ = m.reg.Remove(b.ID)
+}
+
+// cmdTheme switches the active palette. Empty name is a no-op.
+func (m *Model) cmdTheme(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	p := theme.Get(name)
+	if p == nil {
+		return
+	}
+	m.palette = p
+	m.cfg.Theme = name
 }
 
 // logActive records the active buffer's vt size + cursor after a switch.

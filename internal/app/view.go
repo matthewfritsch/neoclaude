@@ -28,42 +28,39 @@ func (m *Model) View() string {
 	b := m.reg.Active()
 	body := blitBuf(m, b, width, rows)
 
-	// Overlay: session picker (<leader>sn) floats above everything.
 	if m.sessionPicker.Active() {
-		overlay := m.sessionPicker.View(width, rows)
+		overlay := m.sessionPicker.View(width, rows, m.palette)
 		composed := overlayCenter(body, overlay, rows)
-		status := ui.Statusline(m.fsm.Mode(), "Sessions — Enter to switch/resume, Esc to close", "", 0, 0, width)
+		status := ui.Statusline(m.fsm.Mode(), "Sessions — Enter to switch/resume, Esc to close", "", 0, 0, width, m.palette)
 		return composed + "\n" + status
 	}
 
-	// Overlay: picker and grep pane float above the buffer grid.
 	if m.picker.Active() {
-		overlay := m.picker.View(width, rows)
+		overlay := m.picker.View(width, rows, m.palette)
 		composed := overlayCenter(body, overlay, rows)
-		status := ui.Statusline(m.fsm.Mode(), activeName(b), activeCwd(b), activeIdx(m), m.reg.Len(), width)
+		status := ui.Statusline(m.fsm.Mode(), activeName(b), activeCwd(b), activeIdx(m), m.reg.Len(), width, m.palette)
 		return composed + "\n" + status
 	}
 	if m.grep.Active() {
-		overlay := m.grep.View(width, rows)
+		overlay := m.grep.View(width, rows, m.palette)
 		composed := overlayCenter(body, overlay, rows)
 		q := m.grep.QueryStr()
 		label := q
 		if label == "" {
 			label = "(grep — type to search, Esc to close)"
 		}
-		status := ui.Statusline(m.fsm.Mode(), label, "", 0, 0, width)
+		status := ui.Statusline(m.fsm.Mode(), label, "", 0, 0, width, m.palette)
 		return composed + "\n" + status
 	}
 
-	// Bottom row: search bar > cmdline > statusline.
 	var bottomRow string
 	switch {
 	case m.search.Active():
-		bottomRow = m.search.View(width)
+		bottomRow = m.search.View(width, m.palette)
 	case m.cmdline.Active():
-		bottomRow = m.cmdline.View(width)
+		bottomRow = m.cmdline.View(width, m.palette)
 	default:
-		bottomRow = ui.Statusline(m.fsm.Mode(), activeName(b), activeCwd(b), activeIdx(m), m.reg.Len(), width)
+		bottomRow = ui.Statusline(m.fsm.Mode(), activeName(b), activeCwd(b), activeIdx(m), m.reg.Len(), width, m.palette)
 	}
 
 	return body + "\n" + bottomRow
@@ -79,6 +76,14 @@ func blitBuf(m *Model, b *buffer.Buffer, width, rows int) string {
 		CursorX:       x,
 		CursorY:       y,
 		CursorVisible: visible,
+	}
+
+	if m.palette != nil {
+		opts.ANSI16 = m.palette.ANSI16Ptr()
+		opts.MatchBg = m.palette.Match
+		opts.MatchFg = m.palette.Bg
+		opts.SelectionBg = m.palette.Selection
+		opts.SelectionFg = m.palette.Fg
 	}
 
 	snap := b.VT.Snapshot()
@@ -103,7 +108,7 @@ func emptyBody(width, rows int) string {
 }
 
 // overlayCenter composites an overlay string on top of a body by replacing the
-// middle rows. Both body and overlay are newline-separated strings.
+// middle rows.
 func overlayCenter(body, overlay string, totalRows int) string {
 	bodyLines := strings.Split(body, "\n")
 	for len(bodyLines) < totalRows {

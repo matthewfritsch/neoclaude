@@ -34,14 +34,17 @@ type Config struct {
 	// Not written to disk; populated by Load/Default.
 	LeaderRune rune `toml:"-"`
 
-	// TODO(P4): Theme string `toml:"theme"` — name or GitHub URL of colorscheme
+	// Theme is the name of the colour palette (default: "onedark").
+	// Built-in: onedark, tokyonight-night, catppuccin-mocha, gruvbox-dark.
+	Theme string `toml:"theme"`
+
 	// TODO(P2+): ScrollbackLines int `toml:"scrollback_lines"` — default 10000
 	// TODO(P1+): Keybinds map[string]string `toml:"keybinds"` — future keymap overrides
 }
 
 // Default returns a Config with all defaults applied.
 func Default() *Config {
-	c := &Config{Leader: " "}
+	c := &Config{Leader: " ", Theme: "onedark"}
 	c.LeaderRune = ' '
 	return c
 }

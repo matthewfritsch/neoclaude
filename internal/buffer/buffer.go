@@ -4,6 +4,8 @@
 package buffer
 
 import (
+	"time"
+
 	"github.com/matthewfritsch/neoclaude/internal/session"
 	"github.com/matthewfritsch/neoclaude/internal/vt"
 )
@@ -18,8 +20,18 @@ type Buffer struct {
 	Cwd        string // working directory the session was spawned in
 	SessionID  string // UUID passed to claude --session-id (empty for anonymous buffers)
 	Session    *session.Session
-	VT         *vt.VT
-	Scrollback *Ring // plain-text lines that have scrolled off the vt top
+	VT           *vt.VT
+	Scrollback   *Ring // plain-text lines that have scrolled off the vt top
+	ScrollOffset int   // lines scrolled back from bottom; 0 = live view
+	LastDataAt   time.Time
+}
+
+// Status returns "idle" or "busy" based on PTY activity.
+func (b *Buffer) Status() string {
+	if b.LastDataAt.IsZero() || time.Since(b.LastDataAt) > 3*time.Second {
+		return "idle"
+	}
+	return "busy"
 }
 
 // New creates a Buffer. The caller is responsible for starting the session's

@@ -1,12 +1,15 @@
 package app
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/matthewfritsch/neoclaude/internal/config"
 	"github.com/matthewfritsch/neoclaude/internal/mode"
 	"github.com/matthewfritsch/neoclaude/internal/persist"
 	"github.com/matthewfritsch/neoclaude/internal/registry"
+	"github.com/matthewfritsch/neoclaude/internal/server"
 	"github.com/matthewfritsch/neoclaude/internal/theme"
 	"github.com/matthewfritsch/neoclaude/internal/ui"
 )
@@ -29,6 +32,8 @@ type Model struct {
 	sessionPicker *ui.SessionPicker
 	store         *persist.Store
 	palette       *theme.Palette
+	srv           *server.Server
+	startedAt     time.Time
 
 	cols int
 	rows int // terminal rows minus status line
@@ -72,6 +77,7 @@ func New() *Model {
 		sessionPicker: &ui.SessionPicker{},
 		store:         store,
 		palette:       pal,
+		startedAt:     time.Now(),
 		needInitial:   true,
 	}
 }
@@ -84,3 +90,48 @@ func (m *Model) FSM() *mode.FSM { return m.fsm }
 
 // Config exposes the loaded config.
 func (m *Model) Config() *config.Config { return m.cfg }
+
+// StartServer launches the background API server. Call StopServer on teardown.
+func (m *Model) StartServer() {
+	s, err := server.New(m)
+	if err != nil {
+		dlog("server start failed: %v", err)
+		return
+	}
+	m.srv = s
+	s.Start()
+	dlog("server listening on %s", server.SocketPath())
+}
+
+// StopServer shuts down the background API server.
+func (m *Model) StopServer() {
+	if m.srv != nil {
+		m.srv.Stop()
+	}
+}
+
+// Sessions implements server.Provider.
+func (m *Model) Sessions() []server.SessionInfo {
+	bufs := m.reg.All()
+	out := make([]server.SessionInfo, len(bufs))
+	for i, b := range bufs {
+		out[i] = server.SessionInfo{
+			ID:        int(b.ID),
+			Name:      b.Name,
+			Cwd:       b.Cwd,
+			SessionID: b.SessionID,
+			Status:    b.Status(),
+			Pid:       b.Session.Pid(),
+		}
+	}
+	return out
+}
+
+// Status implements server.Provider.
+func (m *Model) Status() server.StatusInfo {
+	return server.StatusInfo{
+		ActiveBuffer: m.reg.ActiveIndex(),
+		TotalBuffers: m.reg.Len(),
+		Uptime:       time.Since(m.startedAt).Truncate(time.Second).String(),
+	}
+}

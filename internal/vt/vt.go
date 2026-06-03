@@ -107,6 +107,8 @@ func New(cols, rows int) *VT {
 	}
 	emu := xvt.NewSafeEmulator(cols, rows)
 
+	emu.SetScrollbackSize(10_000)
+
 	v := &VT{
 		emu:           emu,
 		cols:          cols,
@@ -244,25 +246,79 @@ func (v *VT) Size() (cols, rows int) {
 	return v.cols, v.rows
 }
 
+// ScrollbackLen returns the number of lines in the emulator's scrollback buffer.
+func (v *VT) ScrollbackLen() int {
+	return v.emu.ScrollbackLen()
+}
+
+// SetScrollbackSize sets the maximum number of scrollback lines.
+func (v *VT) SetScrollbackSize(n int) {
+	v.emu.SetScrollbackSize(n)
+}
+
 // Snapshot copies the current screen into a Grid for rendering.
 func (v *VT) Snapshot() Grid {
+	return v.SnapshotAt(0)
+}
+
+// SnapshotAt returns a grid scrolled back by offset lines from the bottom.
+// offset=0 is the live terminal view. offset=N shows N lines earlier.
+func (v *VT) SnapshotAt(offset int) Grid {
 	v.mu.Lock()
 	cols, rows := v.cols, v.rows
 	v.mu.Unlock()
 
-	g := Grid{
-		Cells: make([][]Cell, rows),
-		Cols:  cols,
-		Rows:  rows,
+	sbLen := v.emu.ScrollbackLen()
+
+	if offset <= 0 {
+		g := Grid{Cells: make([][]Cell, rows), Cols: cols, Rows: rows}
+		for y := 0; y < rows; y++ {
+			row := make([]Cell, cols)
+			for x := 0; x < cols; x++ {
+				row[x] = cellAt(v.emu, x, y)
+			}
+			g.Cells[y] = row
+		}
+		return g
 	}
+
+	if offset > sbLen {
+		offset = sbLen
+	}
+
+	g := Grid{Cells: make([][]Cell, rows), Cols: cols, Rows: rows}
 	for y := 0; y < rows; y++ {
 		row := make([]Cell, cols)
+		// virtualLine: 0 = top of scrollback, sbLen = screen row 0
+		virtualLine := sbLen - offset + y
 		for x := 0; x < cols; x++ {
-			row[x] = cellAt(v.emu, x, y)
+			if virtualLine < sbLen {
+				row[x] = scrollbackCellAt(v.emu, x, virtualLine)
+			} else {
+				row[x] = cellAt(v.emu, x, virtualLine-sbLen)
+			}
 		}
 		g.Cells[y] = row
 	}
 	return g
+}
+
+// scrollbackCellAt extracts one Cell from the scrollback buffer at (x,y).
+func scrollbackCellAt(emu *xvt.SafeEmulator, x, y int) Cell {
+	c := emu.ScrollbackCellAt(x, y)
+	if c == nil {
+		return Cell{Rune: ' '}
+	}
+	r := firstRune(c.Content)
+	if r == 0 {
+		r = ' '
+	}
+	return Cell{
+		Rune:  r,
+		FG:    colorFrom(c.Style.Fg),
+		BG:    colorFrom(c.Style.Bg),
+		Attrs: attrsFrom(c.Style),
+	}
 }
 
 // Cursor returns the cursor position and whether it is visible.

@@ -35,9 +35,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseMsg:
+		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+			if b := m.reg.Active(); b != nil && m.fsm.Mode() == mode.Normal {
+				if msg.Button == tea.MouseButtonWheelUp {
+					b.ScrollOffset += 3
+					max := b.VT.ScrollbackLen()
+					if b.ScrollOffset > max {
+						b.ScrollOffset = max
+					}
+				} else {
+					b.ScrollOffset -= 3
+					if b.ScrollOffset < 0 {
+						b.ScrollOffset = 0
+					}
+				}
+			}
+		}
+		return m, nil
+
 	case PtyDataMsg:
 		if b := m.reg.ByID(msg.BufID); b != nil {
 			dumpRaw(msg.Data)
+			b.LastDataAt = time.Now()
+			b.ScrollOffset = 0
 			b.VT.Write(msg.Data)
 			if resp := b.VT.DrainResponses(); len(resp) > 0 {
 				_ = b.Session.Write(resp)
@@ -218,6 +239,13 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// --- Normal mode scroll: Ctrl-U/D, PgUp/PgDn ---
+	if cur == mode.Normal {
+		if scrolled := m.handleScroll(k); scrolled {
+			return m, nil
+		}
+	}
+
 	action, _ := m.fsm.HandleKey(k, time.Now())
 
 	switch action {
@@ -349,6 +377,37 @@ func (m *Model) runGrep(query string) tea.Cmd {
 		})
 	}
 	return ui.GrepCmd(query, corpus)
+}
+
+func (m *Model) handleScroll(k tea.KeyMsg) bool {
+	b := m.reg.Active()
+	if b == nil {
+		return false
+	}
+	half := m.rows / 2
+	if half < 1 {
+		half = 1
+	}
+	max := b.VT.ScrollbackLen()
+
+	delta := 0
+	switch k.Type {
+	case tea.KeyCtrlU, tea.KeyPgUp:
+		delta = half
+	case tea.KeyCtrlD, tea.KeyPgDown:
+		delta = -half
+	default:
+		return false
+	}
+
+	b.ScrollOffset += delta
+	if b.ScrollOffset > max {
+		b.ScrollOffset = max
+	}
+	if b.ScrollOffset < 0 {
+		b.ScrollOffset = 0
+	}
+	return true
 }
 
 func (m *Model) yankVisual() {

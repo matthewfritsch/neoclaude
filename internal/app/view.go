@@ -86,6 +86,9 @@ func blitBuf(m *Model, b *buffer.Buffer, width, rows int) string {
 	}
 
 	x, y, visible := b.VT.Cursor()
+	if b.ScrollOffset > 0 {
+		visible = false
+	}
 	opts := render.Options{
 		CursorX:       x,
 		CursorY:       y,
@@ -100,7 +103,7 @@ func blitBuf(m *Model, b *buffer.Buffer, width, rows int) string {
 		opts.SelectionFg = m.palette.Fg
 	}
 
-	snap := b.VT.Snapshot()
+	snap := b.VT.SnapshotAt(b.ScrollOffset)
 
 	if m.search.Active() {
 		opts.SearchMatches = m.search.Matches(snap.Rows)

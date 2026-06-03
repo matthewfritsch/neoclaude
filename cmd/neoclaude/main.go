@@ -21,14 +21,14 @@ func main() {
 	}
 
 	m := app.New()
+	m.StartServer()
+	defer m.StopServer()
+
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	m.Prog = p
 
-	// The initial buffer is spawned by the model on the first WindowSizeMsg, so
-	// claude starts at the real terminal size rather than a guessed default.
 	_, runErr := p.Run()
 
-	// Teardown: kill all remaining sessions.
 	for _, b := range m.Registry().All() {
 		_ = b.Session.Kill()
 	}

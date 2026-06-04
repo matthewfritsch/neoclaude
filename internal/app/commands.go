@@ -54,6 +54,10 @@ func (m *Model) dispatch(line string) tea.Cmd {
 	case "import":
 		m.cmdImport()
 		return nil
+	case "motd":
+		m.infoLines = m.motdLines()
+		m.infoScroll = 0
+		return nil
 	default:
 		return nil
 	}
@@ -252,6 +256,7 @@ func (m *Model) cmdShowCommands() {
 		"  :theme <name>   Switch color theme",
 		"  :q              Quit",
 		"  :import         Import sessions from ~/.claude/",
+		"  :motd           Show welcome screen",
 		"  :commands       This help",
 		"  :keybinds       Show keybindings",
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 var knownCommands = []string{
-	"bd", "bn", "bp", "commands", "import", "keybinds", "name", "new", "q", "theme",
+	"bd", "bn", "bp", "commands", "import", "keybinds", "motd", "name", "new", "q", "theme",
 }
 
 // Cmdline is a minimal inline text-input widget for the : command line.

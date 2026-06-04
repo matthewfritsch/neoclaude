@@ -14,7 +14,11 @@ import (
 )
 
 // Init implements tea.Model.
-func (m *Model) Init() tea.Cmd { return nil }
+func (m *Model) Init() tea.Cmd {
+	m.infoLines = m.motdLines()
+	m.infoScroll = 0
+	return nil
+}
 
 // Update implements tea.Model.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

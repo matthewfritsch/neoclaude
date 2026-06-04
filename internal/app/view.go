@@ -28,12 +28,12 @@ func (m *Model) View() string {
 	}
 
 	b := m.reg.Active()
+	var body string
 	if b == nil && m.reg.Len() == 0 {
-		body := m.motd(width, rows)
-		status := ui.Statusline(m.fsm.Mode(), "neoclaude", "", m.fsm.PendingKeys(), 0, 0, width, m.palette)
-		return body + "\n" + status
+		body = m.motd(width, rows)
+	} else {
+		body = blitBuf(m, b, width, rows)
 	}
-	body := blitBuf(m, b, width, rows)
 
 	// Info overlay (highest priority — :commands, :keybinds).
 	if len(m.infoLines) > 0 {
@@ -79,7 +79,11 @@ func (m *Model) View() string {
 	case m.cmdline.Active():
 		bottomRow = m.cmdline.View(width, m.palette)
 	default:
-		bottomRow = ui.Statusline(m.fsm.Mode(), activeName(b), activeCwd(b), m.fsm.PendingKeys(), activeIdx(m), m.reg.Len(), width, m.palette)
+		name, cwd := activeName(b), activeCwd(b)
+		if b == nil {
+			name = "neoclaude"
+		}
+		bottomRow = ui.Statusline(m.fsm.Mode(), name, cwd, m.fsm.PendingKeys(), activeIdx(m), m.reg.Len(), width, m.palette)
 	}
 
 	return body + "\n" + bottomRow

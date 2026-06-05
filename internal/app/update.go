@@ -50,7 +50,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if b := m.reg.ByID(msg.BufID); b != nil {
 			dumpRaw(msg.Data)
 			b.LastDataAt = time.Now()
-			b.ScrollOffset = 0
 			if m.ptyPending == nil {
 				m.ptyPending = make(map[buffer.ID][]byte)
 			}
@@ -305,6 +304,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case mode.ActionForward:
 		if b := m.reg.Active(); b != nil {
+			b.ScrollOffset = 0
 			if enc := EncodeKey(k); len(enc) > 0 {
 				cx, cy, cv := b.VT.Cursor()
 				vc, vr := b.VT.Size()
@@ -442,7 +442,11 @@ func (m *Model) runGrep(query string) tea.Cmd {
 func (m *Model) flushPtyPending() {
 	for id, data := range m.ptyPending {
 		if b := m.reg.ByID(id); b != nil {
+			oldSB := b.VT.ScrollbackLen()
 			b.VT.Write(data)
+			if b.ScrollOffset > 0 {
+				b.ScrollOffset += b.VT.ScrollbackLen() - oldSB
+			}
 			if resp := b.VT.DrainResponses(); len(resp) > 0 {
 				_ = b.Session.Write(resp)
 			}
@@ -490,7 +494,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	// Wheel scroll
 	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
-		if b != nil && m.fsm.Mode() == mode.Normal {
+		if b != nil {
 			if msg.Button == tea.MouseButtonWheelUp {
 				b.ScrollOffset += 3
 				max := b.VT.ScrollbackLen()

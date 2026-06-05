@@ -30,11 +30,34 @@ type Match struct {
 	ColEnd   int // exclusive
 }
 
-// Selection is a linewise visual selection region.
+// Selection is a visual selection region, either linewise or character-level.
 type Selection struct {
 	Active   bool
+	Linewise bool // true = entire rows; false = character-level (mouse)
 	StartRow int
-	EndRow   int // inclusive; StartRow <= EndRow guaranteed by caller
+	StartCol int // only used when !Linewise
+	EndRow   int // inclusive
+	EndCol   int // exclusive; only used when !Linewise
+}
+
+// Contains reports whether (row, col) is inside the selection.
+func (s Selection) Contains(row, col int) bool {
+	if !s.Active || row < s.StartRow || row > s.EndRow {
+		return false
+	}
+	if s.Linewise {
+		return true
+	}
+	if s.StartRow == s.EndRow {
+		return col >= s.StartCol && col < s.EndCol
+	}
+	if row == s.StartRow {
+		return col >= s.StartCol
+	}
+	if row == s.EndRow {
+		return col < s.EndCol
+	}
+	return true
 }
 
 // Options controls how a grid is rendered.
@@ -88,14 +111,14 @@ func buildMatchCols(matches []Match, rows int) []map[int]bool {
 
 func blitRow(sb *strings.Builder, g vt.Grid, y int, opts Options, matchSet map[int]bool) {
 	row := g.Cells[y]
-	selRow := opts.Selection.Active && y >= opts.Selection.StartRow && y <= opts.Selection.EndRow
+	sel := opts.Selection
 
 	x := 0
 	for x < g.Cols {
 		cell := row[x]
 		cursorHere := opts.CursorVisible && y == opts.CursorY && x == opts.CursorX
 		hitHere := matchSet != nil && matchSet[x]
-		selHere := selRow
+		selHere := sel.Contains(y, x)
 
 		if cursorHere || hitHere || selHere {
 			sb.WriteString(styleForCell(cell, cursorHere, hitHere, selHere, &opts).Render(string(cell.Rune)))
@@ -111,7 +134,7 @@ func blitRow(sb *strings.Builder, g vt.Grid, y int, opts Options, matchSet map[i
 			next := row[x]
 			nextCursor := opts.CursorVisible && y == opts.CursorY && x == opts.CursorX
 			nextHit := matchSet != nil && matchSet[x]
-			nextSel := selRow
+			nextSel := sel.Contains(y, x)
 			if nextCursor || nextHit || nextSel || !sameStyle(cell, next) {
 				break
 			}

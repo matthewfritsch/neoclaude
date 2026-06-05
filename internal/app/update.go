@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -43,23 +44,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
-		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
-			if b := m.reg.Active(); b != nil && m.fsm.Mode() == mode.Normal {
-				if msg.Button == tea.MouseButtonWheelUp {
-					b.ScrollOffset += 3
-					max := b.VT.ScrollbackLen()
-					if b.ScrollOffset > max {
-						b.ScrollOffset = max
-					}
-				} else {
-					b.ScrollOffset -= 3
-					if b.ScrollOffset < 0 {
-						b.ScrollOffset = 0
-					}
-				}
-			}
-		}
-		return m, nil
+		return m.handleMouse(msg)
 
 	case PtyDataMsg:
 		if b := m.reg.ByID(msg.BufID); b != nil {
@@ -118,6 +103,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.mouseSelActive {
+		m.mouseSelActive = false
+	}
+
 	cur := m.fsm.Mode()
 
 	// --- Info overlay (blocks everything, scrollable) ---
@@ -272,6 +261,34 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// --- Visual mode j/k/arrow cursor movement ---
+	if cur == mode.Visual {
+		delta := 0
+		switch k.Type {
+		case tea.KeyDown:
+			delta = 1
+		case tea.KeyUp:
+			delta = -1
+		case tea.KeyRunes:
+			switch string(k.Runes) {
+			case "j":
+				delta = 1
+			case "k":
+				delta = -1
+			}
+		}
+		if delta != 0 {
+			m.visualEnd += delta
+			if m.visualEnd < 0 {
+				m.visualEnd = 0
+			}
+			if m.visualEnd >= m.rows {
+				m.visualEnd = m.rows - 1
+			}
+			return m, nil
+		}
+	}
+
 	// --- Normal mode scroll: Ctrl-U/D, PgUp/PgDn ---
 	if cur == mode.Normal {
 		if scrolled := m.handleScroll(k); scrolled {
@@ -343,18 +360,6 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case mode.ActionExitOverlay:
 		m.search.Close()
 		m.picker.Close()
-	}
-
-	if m.fsm.Mode() == mode.Visual {
-		if b := m.reg.Active(); b != nil {
-			_, y, _ := b.VT.Cursor()
-			if y < m.visualStart {
-				m.visualEnd = m.visualStart
-				m.visualStart = y
-			} else {
-				m.visualEnd = y
-			}
-		}
 	}
 
 	return m, nil
@@ -478,6 +483,94 @@ func (m *Model) handleScroll(k tea.KeyMsg) bool {
 		b.ScrollOffset = 0
 	}
 	return true
+}
+
+func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	b := m.reg.Active()
+
+	// Wheel scroll
+	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+		if b != nil && m.fsm.Mode() == mode.Normal {
+			if msg.Button == tea.MouseButtonWheelUp {
+				b.ScrollOffset += 3
+				max := b.VT.ScrollbackLen()
+				if b.ScrollOffset > max {
+					b.ScrollOffset = max
+				}
+			} else {
+				b.ScrollOffset -= 3
+				if b.ScrollOffset < 0 {
+					b.ScrollOffset = 0
+				}
+			}
+		}
+		return m, nil
+	}
+
+	// Left press — start selection
+	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+		m.mouseSelActive = true
+		m.mouseDragging = true
+		m.mouseSelStart = [2]int{msg.Y, msg.X}
+		m.mouseSelEnd = [2]int{msg.Y, msg.X}
+		return m, nil
+	}
+
+	// Motion while dragging — extend selection
+	if m.mouseDragging && msg.Action == tea.MouseActionMotion {
+		m.mouseSelEnd = [2]int{msg.Y, msg.X}
+		return m, nil
+	}
+
+	// Release — yank and stop dragging (selection stays visible until keypress)
+	if m.mouseDragging && msg.Action == tea.MouseActionRelease {
+		m.mouseDragging = false
+		if m.mouseSelStart != m.mouseSelEnd {
+			m.yankMouseSelection()
+		} else {
+			m.mouseSelActive = false
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m *Model) yankMouseSelection() {
+	b := m.reg.Active()
+	if b == nil {
+		return
+	}
+	snap := b.VT.SnapshotAt(b.ScrollOffset)
+
+	startRow, startCol := m.mouseSelStart[0], m.mouseSelStart[1]
+	endRow, endCol := m.mouseSelEnd[0], m.mouseSelEnd[1]
+	if startRow > endRow || (startRow == endRow && startCol > endCol) {
+		startRow, endRow = endRow, startRow
+		startCol, endCol = endCol, startCol
+	}
+	endCol++
+
+	var lines []string
+	for y := startRow; y <= endRow && y < snap.Rows; y++ {
+		row := snap.Cells[y]
+		cs, ce := 0, snap.Cols
+		if y == startRow {
+			cs = startCol
+		}
+		if y == endRow {
+			ce = endCol
+		}
+		if ce > len(row) {
+			ce = len(row)
+		}
+		var line strings.Builder
+		for x := cs; x < ce; x++ {
+			line.WriteRune(row[x].Rune)
+		}
+		lines = append(lines, strings.TrimRight(line.String(), " "))
+	}
+	_ = writeClipboard(strings.Join(lines, "\n"))
 }
 
 func (m *Model) yankVisual() {

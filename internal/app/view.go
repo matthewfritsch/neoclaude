@@ -113,10 +113,30 @@ func blitBuf(m *Model, b *buffer.Buffer, width, rows int) string {
 		opts.SearchMatches = m.search.Matches(snap.Rows)
 	}
 	if m.fsm.Mode() == mode.Visual {
+		startRow, endRow := m.visualStart, m.visualEnd
+		if startRow > endRow {
+			startRow, endRow = endRow, startRow
+		}
 		opts.Selection = render.Selection{
 			Active:   true,
-			StartRow: m.visualStart,
-			EndRow:   m.visualEnd,
+			Linewise: true,
+			StartRow: startRow,
+			EndRow:   endRow,
+		}
+	}
+	if m.mouseSelActive {
+		sr, sc := m.mouseSelStart[0], m.mouseSelStart[1]
+		er, ec := m.mouseSelEnd[0], m.mouseSelEnd[1]
+		if sr > er || (sr == er && sc > ec) {
+			sr, er = er, sr
+			sc, ec = ec, sc
+		}
+		opts.Selection = render.Selection{
+			Active:   true,
+			StartRow: sr,
+			StartCol: sc,
+			EndRow:   er,
+			EndCol:   ec + 1,
 		}
 	}
 

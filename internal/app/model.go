@@ -40,8 +40,14 @@ type Model struct {
 	rows int // terminal rows minus status line
 
 	// visual selection anchors (row indices, inclusive)
-	visualStart int
-	visualEnd   int
+	visualStart int // anchor row (where v was pressed)
+	visualEnd   int // cursor row (moved by j/k)
+
+	// Mouse drag-select state
+	mouseSelActive bool   // selection visible (during and after drag)
+	mouseDragging  bool   // left button held
+	mouseSelStart  [2]int // [row, col]
+	mouseSelEnd    [2]int // [row, col]
 
 	// infoLines, when non-nil, renders a centered text overlay (Esc to close).
 	infoLines  []string

@@ -12,7 +12,7 @@ import (
 )
 
 var knownCommands = []string{
-	"bd", "bn", "bp", "commands", "import", "keybinds", "motd", "name", "new", "q", "theme",
+	"bd", "bn", "bp", "claude", "codex", "commands", "import", "keybinds", "motd", "name", "new", "new_claude", "new_codex", "q", "theme",
 }
 
 // Cmdline is a minimal inline text-input widget for the : command line.
@@ -185,7 +185,7 @@ func (c *Cmdline) tabComplete() {
 	}
 
 	switch cmd {
-	case "new":
+	case "new", "new_claude", "new_codex", "claude", "codex":
 		c.completeFromList(cmd, arg, CompletePath(arg))
 	case "theme":
 		if c.Completions != nil {
@@ -245,13 +245,19 @@ func CompletePath(prefix string) []string {
 			continue
 		}
 		full := filepath.Join(dir, name)
+		isDir := e.IsDir()
+		if !isDir {
+			if info, err := os.Stat(full); err == nil && info.IsDir() {
+				isDir = true
+			}
+		}
 		if strings.HasPrefix(prefix, "~/") || prefix == "~" {
 			home, _ := os.UserHomeDir()
 			if strings.HasPrefix(full, home) {
 				full = "~" + full[len(home):]
 			}
 		}
-		if e.IsDir() {
+		if isDir {
 			full += "/"
 		}
 		matches = append(matches, full)

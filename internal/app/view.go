@@ -151,9 +151,10 @@ func (m *Model) motdLines() []string {
 
 	lines := []string{
 		"neoclaude",
-		"Neovim-flavored Claude Code multiplexer",
+		"Neovim-flavored Claude Code and Codex multiplexer",
 		"",
-		"  :new [path]       open a new session",
+		"  :new [path]       open a new Claude session",
+		"  :new_codex [path] open a new Codex session",
 		"  :import           import sessions from ~/.claude/",
 		"  " + leader + " s n           resume a previous session",
 		"  :motd             show this screen",
@@ -264,7 +265,7 @@ func activeName(b *buffer.Buffer) string {
 	if b == nil {
 		return ""
 	}
-	return b.Name
+	return b.Agent.String() + ":" + b.Name
 }
 
 func activeCwd(b *buffer.Buffer) string {

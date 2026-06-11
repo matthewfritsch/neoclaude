@@ -15,6 +15,7 @@ import (
 // SessionInfo is the JSON shape returned by the sessions API.
 type SessionInfo struct {
 	ID        int    `json:"id"`
+	Agent     string `json:"agent"`
 	Name      string `json:"name"`
 	Cwd       string `json:"cwd"`
 	SessionID string `json:"session_id"`

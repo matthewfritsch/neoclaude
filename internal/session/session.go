@@ -1,7 +1,7 @@
-// Package session manages a single PTY-wrapped child process (a `claude` CLI
-// session). It spawns the child on a pseudo-terminal, streams its output to the
-// Bubble Tea program via a read goroutine, forwards keystrokes, handles
-// resizes, and tears the child down cleanly.
+// Package session manages a single PTY-wrapped child process (a `claude` or
+// `codex` CLI session). It spawns the child on a pseudo-terminal, streams its
+// output to the Bubble Tea program via a read goroutine, forwards keystrokes,
+// handles resizes, and tears the child down cleanly.
 package session
 
 import (
@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/matthewfritsch/neoclaude/internal/agent"
 )
 
 // Session is a running child on a PTY.
@@ -23,6 +25,8 @@ type Session struct {
 
 // Opts configures how a new session is started.
 type Opts struct {
+	// Agent is the CLI to launch. Empty defaults to claude.
+	Agent agent.Type
 	// UUID is passed as --session-id to claude so the session can be resumed
 	// later with Resume(). Required for named sessions; leave empty for the
 	// initial anonymous buffer spawned at startup.
@@ -35,11 +39,11 @@ type Opts struct {
 	Cols, Rows uint16
 }
 
-// Start launches a new claude session on a PTY using opts.
-// The argv is always ["claude", ...flags...]; callers provide flags via Opts.
+// Start launches a new agent session on a PTY using opts.
 func Start(opts Opts) (*Session, error) {
-	argv := []string{"claude"}
-	if opts.UUID != "" {
+	kind := agent.Normalize(string(opts.Agent))
+	argv := []string{kind.Command()}
+	if kind == agent.Claude && opts.UUID != "" {
 		argv = append(argv, "--session-id", opts.UUID)
 	}
 	return startProcess(argv, opts.Cwd, opts.Cols, opts.Rows)
@@ -48,9 +52,12 @@ func Start(opts Opts) (*Session, error) {
 // Resume spawns a claude session that resumes a prior conversation identified
 // by uuid using claude's own -r/--resume flag. Context is fully restored by
 // claude itself.
-func Resume(uuid, cwd string, cols, rows uint16) (*Session, error) {
+func Resume(kind agent.Type, uuid, cwd string, cols, rows uint16) (*Session, error) {
 	if uuid == "" {
 		return nil, errors.New("session: resume requires a non-empty uuid")
+	}
+	if !kind.SupportsResume() {
+		return nil, errors.New("session: resume is only supported for claude")
 	}
 	argv := []string{"claude", "--resume", uuid}
 	return startProcess(argv, cwd, cols, rows)

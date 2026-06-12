@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/matthewfritsch/neoclaude/internal/agent"
 	"github.com/matthewfritsch/neoclaude/internal/buffer"
 	"github.com/matthewfritsch/neoclaude/internal/mode"
 	"github.com/matthewfritsch/neoclaude/internal/persist"
@@ -376,10 +377,11 @@ func (m *Model) openSessionPicker() tea.Cmd {
 			}
 			liveEntries = append(liveEntries, ui.SessionEntry{
 				LiveBufID: int(b.ID),
+				Agent:     b.Agent,
 				UUID:      b.SessionID,
 				Name:      b.Name,
 				Cwd:       b.Cwd,
-				Display:   b.Name + " " + b.Cwd,
+				Display:   b.Agent.String() + " " + b.Name + " " + b.Cwd,
 			})
 		}
 		entries := ui.BuildSessionEntries(liveEntries, m.store, openUUIDs)
@@ -392,7 +394,7 @@ type sessionPickerOpenMsg struct{ entries []ui.SessionEntry }
 
 // closedRecord reconstructs a persist.Record from a closed SessionEntry.
 func closedRecord(e *ui.SessionEntry) persist.Record {
-	return persist.Record{UUID: e.UUID, Name: e.Name, Cwd: e.Cwd}
+	return persist.Record{Agent: e.Agent, UUID: e.UUID, Name: e.Name, Cwd: e.Cwd}
 }
 
 func (m *Model) openSearch() {
@@ -421,6 +423,9 @@ func (m *Model) runGrep(query string) tea.Cmd {
 	closed := m.store.Closed(openUUIDs)
 	return func() tea.Msg {
 		for _, r := range closed {
+			if agent.Normalize(string(r.Agent)) != agent.Claude {
+				continue
+			}
 			lines := persist.ExtractSessionText(r.UUID, r.Cwd)
 			if len(lines) > 0 {
 				corpus = append(corpus, ui.GrepCorpusEntry{

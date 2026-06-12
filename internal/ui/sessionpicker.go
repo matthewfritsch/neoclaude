@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sahilm/fuzzy"
 
+	"github.com/matthewfritsch/neoclaude/internal/agent"
 	"github.com/matthewfritsch/neoclaude/internal/persist"
 	"github.com/matthewfritsch/neoclaude/internal/theme"
 )
@@ -15,6 +16,7 @@ import (
 // SessionEntry is one item in the named-session picker.
 type SessionEntry struct {
 	LiveBufID  int // >= 0 means this is a live buffer; -1 means closed
+	Agent      agent.Type
 	UUID       string
 	Name       string
 	Cwd        string
@@ -102,9 +104,9 @@ func (p *SessionPicker) filter() {
 type PickerAction int
 
 const (
-	PickerNone    PickerAction = iota
-	PickerSelect               // Enter — open/resume the entry
-	PickerDelete               // d — delete the closed entry
+	PickerNone   PickerAction = iota
+	PickerSelect              // Enter — open/resume the entry
+	PickerDelete              // d — delete the closed entry
 )
 
 // HandleKey processes keys inside the picker.
@@ -290,10 +292,11 @@ func BuildSessionEntries(liveEntries []SessionEntry, store *persist.Store, openU
 	for _, r := range store.Closed(openUUIDs) {
 		out = append(out, SessionEntry{
 			LiveBufID: -1,
+			Agent:     r.Agent,
 			UUID:      r.UUID,
 			Name:      r.Name,
 			Cwd:       r.Cwd,
-			Display:   r.Name + " " + r.Cwd,
+			Display:   agent.Normalize(string(r.Agent)).String() + " " + r.Name + " " + r.Cwd,
 		})
 	}
 	return out

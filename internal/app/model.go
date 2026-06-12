@@ -131,6 +131,7 @@ func (m *Model) Sessions() []server.SessionInfo {
 	for i, b := range bufs {
 		out[i] = server.SessionInfo{
 			ID:        int(b.ID),
+			Agent:     b.Agent.String(),
 			Name:      b.Name,
 			Cwd:       b.Cwd,
 			SessionID: b.SessionID,

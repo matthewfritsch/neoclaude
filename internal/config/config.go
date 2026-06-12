@@ -51,10 +51,14 @@ func Default() *Config {
 
 // configPath returns the platform config file path.
 func configPath() string {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".config")
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		var err error
+		base, err = os.UserConfigDir()
+		if err != nil {
+			home, _ := os.UserHomeDir()
+			base = filepath.Join(home, ".config")
+		}
 	}
 	return filepath.Join(base, "neoclaude", "config.toml")
 }

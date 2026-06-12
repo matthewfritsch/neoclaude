@@ -25,6 +25,9 @@ func FuzzyFilter(reg *registry.Registry, query string) []BufEntry {
 	displays := make([]string, len(bufs))
 	for i, b := range bufs {
 		displays[i] = b.Name + " " + b.Cwd
+		if b.Agent.String() != "claude" {
+			displays[i] = b.Agent.String() + " " + displays[i]
+		}
 	}
 
 	if query == "" {

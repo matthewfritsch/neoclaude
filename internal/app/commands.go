@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 
+	"github.com/matthewfritsch/neoclaude/internal/agent"
 	"github.com/matthewfritsch/neoclaude/internal/buffer"
 	"github.com/matthewfritsch/neoclaude/internal/persist"
 	"github.com/matthewfritsch/neoclaude/internal/session"
@@ -24,7 +25,11 @@ func (m *Model) dispatch(line string) tea.Cmd {
 
 	switch verb {
 	case "new":
-		return m.cmdNew(rest)
+		return m.cmdNewAgent(agent.Claude, rest)
+	case "new_claude", "new-claude", "claude":
+		return m.cmdNewAgent(agent.Claude, rest)
+	case "new_codex", "new-codex", "codex":
+		return m.cmdNewAgent(agent.Codex, rest)
 	case "bn":
 		m.reg.Next()
 		m.logActive("bn")
@@ -64,13 +69,14 @@ func (m *Model) dispatch(line string) tea.Cmd {
 }
 
 // CmdNew is the exported entry point used by main to spawn the initial buffer.
-func (m *Model) CmdNew(path string) tea.Cmd { return m.cmdNew(path) }
+func (m *Model) CmdNew(path string) tea.Cmd { return m.cmdNewAgent(agent.Claude, path) }
 
-// cmdNew spawns a new claude buffer. args is the optional cwd from :new [path].
+// cmdNewAgent spawns a new agent buffer. args is the optional cwd.
 // Name is always derived from the cwd basename and de-duplicated; use :name to
 // rename after spawn.
-func (m *Model) cmdNew(args string) tea.Cmd {
+func (m *Model) cmdNewAgent(kind agent.Type, args string) tea.Cmd {
 	return func() tea.Msg {
+		kind = agent.Normalize(string(kind))
 		cwd := strings.TrimSpace(args)
 
 		// Resolve cwd.
@@ -97,15 +103,18 @@ func (m *Model) cmdNew(args string) tea.Cmd {
 			rows = 23
 		}
 
-		// Generate UUID for this session so it can be resumed later.
-		sessID := uuid.New().String()
+		sessID := ""
+		if kind == agent.Claude {
+			sessID = uuid.New().String()
+		}
 
 		sess, err := session.Start(session.Opts{
-			UUID: sessID,
-			Name: name,
-			Cwd:  cwd,
-			Cols: uint16(cols),
-			Rows: uint16(rows),
+			Agent: kind,
+			UUID:  sessID,
+			Name:  name,
+			Cwd:   cwd,
+			Cols:  uint16(cols),
+			Rows:  uint16(rows),
 		})
 		if err != nil {
 			return PtyExitMsg{BufID: -1, Err: fmt.Errorf("spawn: %w", err)}
@@ -113,16 +122,18 @@ func (m *Model) cmdNew(args string) tea.Cmd {
 
 		id := m.reg.NextID()
 		terminal := vt.New(cols, rows)
-		buf := buffer.New(id, name, cwd, sessID, sess, terminal)
+		buf := buffer.NewWithAgent(id, kind, name, cwd, sessID, sess, terminal)
 		m.reg.Add(buf)
 
-		// Persist immediately so a crash after spawn still records the session.
-		m.store.Upsert(persist.Record{
-			UUID: sessID,
-			Name: name,
-			Cwd:  cwd,
-		})
-		_ = m.store.Save()
+		if kind == agent.Claude {
+			m.store.Upsert(persist.Record{
+				Agent: agent.Claude,
+				UUID:  sessID,
+				Name:  name,
+				Cwd:   cwd,
+			})
+			_ = m.store.Save()
+		}
 
 		prog := m.Prog
 		go sess.ReadLoop(
@@ -146,7 +157,8 @@ func (m *Model) cmdResume(rec persist.Record) tea.Cmd {
 			rows = 23
 		}
 
-		sess, err := session.Resume(rec.UUID, rec.Cwd, uint16(cols), uint16(rows))
+		kind := agent.Normalize(string(rec.Agent))
+		sess, err := session.Resume(kind, rec.UUID, rec.Cwd, uint16(cols), uint16(rows))
 		if err != nil {
 			return PtyExitMsg{BufID: -1, Err: fmt.Errorf("resume: %w", err)}
 		}
@@ -155,14 +167,15 @@ func (m *Model) cmdResume(rec persist.Record) tea.Cmd {
 		id := m.reg.NextID()
 		name := m.uniqueName(rec.Name)
 		terminal := vt.New(cols, rows)
-		buf := buffer.New(id, name, rec.Cwd, rec.UUID, sess, terminal)
+		buf := buffer.NewWithAgent(id, kind, name, rec.Cwd, rec.UUID, sess, terminal)
 		m.reg.Add(buf)
 
 		// Update lastSeen.
 		m.store.Upsert(persist.Record{
-			UUID: rec.UUID,
-			Name: name,
-			Cwd:  rec.Cwd,
+			Agent: kind,
+			UUID:  rec.UUID,
+			Name:  name,
+			Cwd:   rec.Cwd,
 		})
 		_ = m.store.Save()
 
@@ -199,15 +212,15 @@ func (m *Model) cmdRename(name string) {
 	b.Name = name
 	if b.SessionID != "" {
 		m.store.Upsert(persist.Record{
-			UUID: b.SessionID,
-			Name: name,
-			Cwd:  b.Cwd,
+			Agent: b.Agent,
+			UUID:  b.SessionID,
+			Name:  name,
+			Cwd:   b.Cwd,
 		})
 		_ = m.store.Save()
 	}
-	// Forward to the live claude session: clear the input line, then run
-	// claude's own /rename slash command.
-	if b.Session != nil {
+	// Forward to Claude only; Codex has no compatible /rename command.
+	if b.Agent == agent.Claude && b.Session != nil {
 		_ = b.Session.Write([]byte("\x15/rename " + name + "\r"))
 	}
 }
@@ -248,7 +261,8 @@ func (m *Model) cmdShowCommands() {
 	m.infoLines = []string{
 		"Commands",
 		"",
-		"  :new [path]     Open new buffer",
+		"  :new [path]       Open new Claude buffer",
+		"  :new_codex [path] Open new Codex buffer",
 		"  :bd             Close active buffer",
 		"  :bn             Next buffer",
 		"  :bp             Previous buffer",

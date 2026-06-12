@@ -1,6 +1,6 @@
 # neoclaude
 
-A Neovim-flavored TUI (Go + Bubble Tea) that manages multiple `claude` CLI sessions as
+A Neovim-flavored TUI (Go + Bubble Tea) that manages multiple `claude` and `codex` CLI sessions as
 PTY-wrapped "buffers", each rendered through a vt10x terminal emulator and blitted into a
 lipgloss view.
 
@@ -8,10 +8,10 @@ lipgloss view.
 
 ## Completion criteria
 
-1. Manage multiple live `claude` sessions concurrently inside one TUI.
+1. Manage multiple live `claude` and `codex` sessions concurrently inside one TUI.
 2. Vim-like modal editing (NORMAL / INSERT / COMMAND / VISUAL / SEARCH) with a command line.
 3. Buffer navigation: `:bn`/`:bp`/`:bd` plus a `<leader><leader>` fuzzy buffer picker.
-4. `:new [path]` spawns a new claude session in a chosen working directory.
+4. `:new [path]` spawns a new claude session in a chosen working directory; `:new_codex [path]` spawns Codex.
 5. Named sessions with persistence + resume via claude's own `--session-id`/`-r` machinery.
 6. In-buffer search (`/`) over visible output and scrollback with `n`/`N` navigation.
 7. Live-grep (`<leader>sg`) across all open buffers, jump to buffer+line.
@@ -33,7 +33,7 @@ go run ./cmd/neoclaude
 
 ## Key bindings
 
-Starts in **INSERT** mode — all keys go directly to the active `claude` session.
+Starts in **INSERT** mode — all keys go directly to the active managed CLI session.
 
 | Key | Mode | Action |
 |-----|------|--------|
@@ -55,6 +55,7 @@ Starts in **INSERT** mode — all keys go directly to the active `claude` sessio
 | Command | Effect |
 |---------|--------|
 | `:new [path]` | Spawn a new claude session (optionally in `path`). Tab-completes paths. Name defaults to `basename(path)`. |
+| `:new_codex [path]` | Spawn a new Codex session (optionally in `path`). Tab-completes paths. |
 | `:name <NAME>` | Rename the active buffer's neoclaude label and update `sessions.json`. Claude's own display name (set at spawn via `-n`) is unchanged. |
 | `:bn` | Next buffer |
 | `:bp` | Previous buffer |
@@ -62,7 +63,7 @@ Starts in **INSERT** mode — all keys go directly to the active `claude` sessio
 
 ## Named sessions and resume (P3)
 
-Every buffer spawned by `:new` gets a UUID and is launched as:
+Every Claude buffer spawned by `:new` gets a UUID and is launched as:
 
 ```
 claude --session-id <uuid> -n <name>
@@ -75,7 +76,7 @@ Double-Esc → NORMAL → `<leader>sn`. The picker shows:
 - **●** Live buffers (switch to them with Enter)
 - **○** Closed/persisted sessions (Enter spawns `claude --resume <uuid>` in its stored cwd — full conversation context is restored by claude)
 
-Sessions survive process restart: `<leader>sn` on a fresh launch still lists prior named sessions.
+Claude sessions survive process restart: `<leader>sn` on a fresh launch still lists prior named sessions. Codex buffers are listed while live.
 
 ### Sessions file
 
@@ -99,7 +100,7 @@ leader = " "
 ```
 
 The leader key fires **only in NORMAL mode**. In INSERT, all keys (including space)
-are forwarded raw to the active claude session.
+are forwarded raw to the active managed CLI session.
 
 ## Development
 

@@ -17,14 +17,17 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/matthewfritsch/neoclaude/internal/agent"
 )
 
 // Record describes one named session.
 type Record struct {
-	UUID     string    `json:"uuid"`
-	Name     string    `json:"name"`
-	Cwd      string    `json:"cwd"`
-	LastSeen time.Time `json:"last_seen"`
+	Agent    agent.Type `json:"agent,omitempty"`
+	UUID     string     `json:"uuid"`
+	Name     string     `json:"name"`
+	Cwd      string     `json:"cwd"`
+	LastSeen time.Time  `json:"last_seen"`
 }
 
 // Store is the in-memory view of sessions.json.
@@ -60,6 +63,9 @@ func Load() (*Store, error) {
 		// Corrupt file: return an empty store so the app can continue.
 		return &Store{path: path}, fmt.Errorf("persist: parse %s: %w", path, err)
 	}
+	for i := range s.Records {
+		s.Records[i].Agent = agent.Normalize(string(s.Records[i].Agent))
+	}
 	return s, nil
 }
 
@@ -89,6 +95,7 @@ func (s *Store) Save() error {
 // Upsert inserts or updates the record for r.UUID. LastSeen is always set to
 // the current time.
 func (s *Store) Upsert(r Record) {
+	r.Agent = agent.Normalize(string(r.Agent))
 	r.LastSeen = time.Now().UTC()
 	for i, rec := range s.Records {
 		if rec.UUID == r.UUID {
@@ -166,7 +173,7 @@ func (s *Store) ImportClaudeSessions() (int, error) {
 			if name == "" {
 				name = uuid[:8]
 			}
-			s.Upsert(Record{UUID: uuid, Name: name, Cwd: cwd})
+			s.Upsert(Record{Agent: agent.Claude, UUID: uuid, Name: name, Cwd: cwd})
 			known[uuid] = true
 			count++
 		}
@@ -293,4 +300,3 @@ func extractTitle(path string) string {
 	}
 	return ""
 }
-
